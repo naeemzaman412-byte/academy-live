@@ -59,7 +59,6 @@ export default function AnnotationCanvas({
   const [tool, setTool] = useState<"pen" | "highlighter" | "spotlight">("pen");
   const highlighter = tool === "highlighter";
   const spotRef = useRef<{ x: number; y: number } | null>(null);
-  const spotTimerRef = useRef<number | null>(null);
   const lastRectRef = useRef("");
   const [color, setColor] = useState(COLORS[0]);
   const [lineWidth, setLineWidth] = useState(4);
@@ -134,6 +133,18 @@ export default function AnnotationCanvas({
     return () => window.clearInterval(id);
   }, [getContentRect, redraw]);
 
+  // Leaving the spotlight tool (or closing drawing mode) switches the dot off for everyone.
+  useEffect(() => {
+    if (spotRef.current && (!annotateMode || tool !== "spotlight") && isHost) {
+      spotRef.current = null;
+      redraw();
+      room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({ t: "spotoff" })), {
+        reliable: true,
+        topic: ANNOTATION_TOPIC,
+      });
+    }
+  }, [annotateMode, tool, isHost, redraw, room]);
+
   // Redraw whenever the parent tells us the underlying video's layout changed.
   useEffect(() => {
     redraw();
@@ -170,17 +181,14 @@ export default function AnnotationCanvas({
   function applyMessage(msg: WireMessage) {
     if (msg.t === "clear") {
       strokesRef.current.clear();
+      spotRef.current = null;
       redraw();
       return;
     }
     if (msg.t === "spot") {
+      // The spotlight STAYS where it was put (until the teacher changes tool,
+      // closes drawing mode or presses clear) and can be dragged anywhere.
       spotRef.current = { x: msg.x, y: msg.y };
-      if (spotTimerRef.current !== null) window.clearTimeout(spotTimerRef.current);
-      // safety net: if the "off" packet is lost, hide the dot by itself
-      spotTimerRef.current = window.setTimeout(() => {
-        spotRef.current = null;
-        redraw();
-      }, 2500);
       redraw();
       return;
     }
@@ -218,9 +226,9 @@ export default function AnnotationCanvas({
     }
   }
 
-  function publish(msg: WireMessage) {
+  function publish(msg: WireMessage, forceReliable = false) {
     room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(msg)), {
-      reliable: msg.t !== "spot",
+      reliable: forceReliable || msg.t !== "spot",
       topic: ANNOTATION_TOPIC,
     });
   }
@@ -272,8 +280,9 @@ export default function AnnotationCanvas({
     if (!id) return;
     drawingIdRef.current = null;
     if (id === "spot") {
-      applyMessage({ t: "spotoff" });
-      publish({ t: "spotoff" });
+      // finger/mouse released: keep the dot visible, just make sure everyone has its final position
+      const last = spotRef.current;
+      if (last) publish({ t: "spot", x: last.x, y: last.y }, true);
       return;
     }
     applyMessage({ t: "end", id });

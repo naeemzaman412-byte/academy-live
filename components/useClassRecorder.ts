@@ -44,12 +44,14 @@ function isMobile() {
 }
 
 function pickMime(): string {
-  // Phones' gallery apps play .mp4 everywhere but often not .webm, so prefer mp4 there.
+  // H.264 .mp4 plays everywhere (Windows Media Player, phone galleries, WhatsApp).
+  // VP9 .webm often shows as an empty, unplayable file on Windows without extra codecs,
+  // so mp4 is tried first and webm is only the fallback.
   const mp4 = ["video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/mp4;codecs=avc1,opus", "video/mp4"];
   const candidates = [
-    ...(isMobile() ? mp4 : []),
-    "video/webm;codecs=vp9,opus",
+    ...mp4,
     "video/webm;codecs=vp8,opus",
+    "video/webm;codecs=vp9,opus",
     "video/webm",
     "video/mp4",
   ];

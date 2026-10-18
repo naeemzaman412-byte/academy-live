@@ -213,6 +213,10 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
         setSharePaused(false);
         await localParticipant.setScreenShareEnabled(true, {
           audio: shareSound,
+          // never let the teacher pick this very tab (it would show itself inside itself)
+          selfBrowserSurface: "exclude",
+          // keep the mouse pointer visible in the shared video so students see where you point
+          video: { cursor: "always" } as unknown as true,
           contentHint: optimizeVideo ? "motion" : "detail",
           resolution: (optimizeVideo ? ScreenSharePresets.h1080fps30 : ScreenSharePresets.h1080fps15).resolution,
         });

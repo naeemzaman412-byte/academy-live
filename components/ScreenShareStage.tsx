@@ -131,6 +131,15 @@ export default function ScreenShareStage({
     };
   }, [bump]);
 
+  // Sharing the ENTIRE screen from the same browser shows the class page inside
+  // itself (a mirror tunnel) — the lagging copies are what looked like a wrong
+  // pointer/spotlight position. In that case show a clear status card instead.
+  const surface = isLocalShare
+    ? (trackRef.publication?.track?.mediaStreamTrack?.getSettings() as { displaySurface?: string } | undefined)
+        ?.displaySurface
+    : undefined;
+  const mirrorRisk = isLocalShare && surface === "monitor";
+
   const canMove = !locked && !annotateMode;
 
   function onWheel(e: React.WheelEvent) {
@@ -216,8 +225,20 @@ export default function ScreenShareStage({
         />
       </div>
 
+      {mirrorRisk && (
+        <div className="absolute inset-0 z-[24] flex items-center justify-center bg-zinc-950 p-6 text-center">
+          <div className="max-w-md space-y-2 text-sm text-zinc-200">
+            <div className="text-base font-semibold text-emerald-400">আপনার পুরো স্ক্রিন শেয়ার হচ্ছে</div>
+            <p>স্টুডেন্টরা আপনার স্ক্রিনই দেখছে। এই পেজ নিজের ভেতরে নিজেকে দেখালে ভুল জায়গায় দেখা যায়, তাই এখানে প্রিভিউ বন্ধ রাখা হয়েছে।</p>
+            <p className="text-zinc-400">
+              আঁকা ও স্পটলাইট ব্যবহার করতে শেয়ার বন্ধ করে শুধু একটি উইন্ডো (Word / PDF) শেয়ার করুন।
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* zoom controls for the viewer */}
-      {!annotateMode && (
+      {!annotateMode && !mirrorRisk && (
         <div className="absolute bottom-2 left-2 z-[37] flex items-center gap-1 rounded-lg bg-zinc-900/90 p-1 text-sm text-zinc-100 shadow-lg">
           <button
             type="button"
