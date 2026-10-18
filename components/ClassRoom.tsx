@@ -159,9 +159,8 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
   const [notice, setNotice] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [locked, setLocked] = useState(false);
-  // which floating window (if any) is showing the drawing board; tied to the window
-  // object so it resets by itself when that window closes
-  const [drawWin, setDrawWin] = useState<Window | null>(null);
+  // is the drawing board showing inside the floating window? (reset whenever a floating window is (re)opened)
+  const [drawOpen, setDrawOpen] = useState(false);
   // Chrome 136+ "Captured Surface Control": lets the preview forward mouse-wheel
   // scrolling to the tab that is being shared (only works when a browser TAB is shared).
   const [captureController, setCaptureController] = useState<unknown>(undefined);
@@ -311,7 +310,10 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
   const { open: openPip, close: closePip, supported: pipSupported, pipWindow } = pip;
   useEffect(() => {
     if (isScreenShareEnabled && pipSupported && !floatHidden) {
-      openPip().then((ok) => setPipBlocked(!ok));
+      openPip().then((ok) => {
+        setPipBlocked(!ok);
+        setDrawOpen(false);
+      });
     } else {
       closePip();
     }
@@ -329,24 +331,43 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const drawOn = !!pipWindow && drawWin === pipWindow && !!activeScreenShare && isLocalShare;
+  const drawOn = drawOpen && !!pipWindow && !!activeScreenShare && isLocalShare;
 
-  function resizePip(w: number, h: number) {
+  function resizePip(w: number, h: number, left: number, top: number) {
     try {
       pipWindow?.resizeTo(w, h);
-      pipWindow?.moveTo(Math.max(0, window.screen.availWidth - w - 20), 20);
+      pipWindow?.moveTo(Math.max(0, left), Math.max(0, top));
     } catch {
       /* resizing needs a fresh click — ignore */
     }
   }
   function openPipDraw() {
     if (!pipWindow) return;
-    resizePip(Math.min(1000, window.screen.availWidth - 40), Math.min(680, window.screen.availHeight - 80));
-    setDrawWin(pipWindow);
+    // A compact board in the bottom-right corner, so the shared Word/PDF stays visible and
+    // scrollable with the real mouse wheel right next to it.
+    const dims = activeScreenShare?.publication?.dimensions;
+    const aspect = dims?.width && dims?.height ? dims.width / dims.height : 16 / 9;
+    const w = Math.min(560, Math.round(window.screen.availWidth * 0.4));
+    const h = Math.min(560, Math.max(380, Math.round(w / aspect)));
+    resizePip(w, h, window.screen.availWidth - w - 12, window.screen.availHeight - h - 60);
+    setDrawOpen(true);
   }
   function closePipDraw() {
-    resizePip(680, 84);
-    setDrawWin(null);
+    resizePip(680, 84, window.screen.availWidth - 680 - 20, 20);
+    setDrawOpen(false);
+  }
+
+  /** Scroll the shared TAB (Chrome 136+, tab shares only). dy > 0 = down. */
+  async function scrollSharedTab(dy: number) {
+    const c = captureController as
+      | { sendWheel?: (a: { x: number; y: number; wheelDeltaX: number; wheelDeltaY: number }) => Promise<void> }
+      | undefined;
+    if (!c?.sendWheel) return;
+    try {
+      await c.sendWheel({ x: 400, y: 300, wheelDeltaX: 0, wheelDeltaY: -dy });
+    } catch {
+      flash("স্ক্রল করা যায়নি — শেয়ার করা ট্যাব খোলা আছে কিনা দেখুন");
+    }
   }
 
   const showStrip = !!activeScreenShare && videoMode === "strip";
@@ -476,7 +497,7 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
       {pipWindow &&
         createPortal(
           drawOn && activeScreenShare ? (
-            <PipDrawBoard trackRef={activeScreenShare} onClose={closePipDraw} />
+            <PipDrawBoard trackRef={activeScreenShare} onClose={closePipDraw} onScroll={scrollSharedTab} />
           ) : (
           <FloatingShareBar
             onDraw={isHost && isLocalShare ? openPipDraw : undefined}

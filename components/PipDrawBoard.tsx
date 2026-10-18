@@ -13,9 +13,12 @@ import AnnotationCanvas, { type ContentRect } from "@/components/AnnotationCanva
 export default function PipDrawBoard({
   trackRef,
   onClose,
+  onScroll,
 }: {
   trackRef: TrackReference;
   onClose: () => void;
+  /** scrolls the shared browser TAB (only works when a Chrome tab is being shared) */
+  onScroll?: (dy: number) => void;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
@@ -26,6 +29,7 @@ export default function PipDrawBoard({
     trackRef.publication?.track?.mediaStreamTrack?.getSettings() as { displaySurface?: string } | undefined
   )?.displaySurface;
   const mirrorRisk = surface === "monitor";
+  const canScroll = !!onScroll && surface === "browser";
 
   const getContentRect = useCallback((): ContentRect | null => {
     const wrapper = wrapperRef.current;
@@ -88,8 +92,20 @@ export default function PipDrawBoard({
         onClick={onClose}
         className="absolute right-2 top-2 z-40 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-emerald-500"
       >
-        ▣ ছোট করুন (স্ক্রল/পেজ বদলাতে)
+        ✕ বন্ধ
       </button>
+      {canScroll ? (
+        <div className="absolute bottom-2 right-2 z-40 flex flex-col gap-1 rounded-lg bg-zinc-900/90 p-1 text-sm text-zinc-100 shadow-lg">
+          <button type="button" onClick={() => onScroll?.(-800)} className="h-8 w-10 rounded hover:bg-zinc-700" title="আগের পেজ">⇈</button>
+          <button type="button" onClick={() => onScroll?.(-120)} className="h-8 w-10 rounded hover:bg-zinc-700" title="একটু ওপরে">▲</button>
+          <button type="button" onClick={() => onScroll?.(120)} className="h-8 w-10 rounded hover:bg-zinc-700" title="একটু নিচে">▼</button>
+          <button type="button" onClick={() => onScroll?.(800)} className="h-8 w-10 rounded hover:bg-zinc-700" title="পরের পেজ">⇊</button>
+        </div>
+      ) : (
+        <div className="pointer-events-none absolute bottom-1 left-1/2 z-40 -translate-x-1/2 rounded bg-black/70 px-2 py-0.5 text-[10px] text-zinc-300">
+          পেজ বদলাতে Word/PDF-এ মাউস-হুইল ঘোরান — এই বোর্ড ডানে-নিচে আলাদা থাকে
+        </div>
+      )}
     </div>
   );
 }

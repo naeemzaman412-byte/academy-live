@@ -330,7 +330,7 @@ export default function ScreenShareStage({
       )}
 
       {/* page / scroll buttons for the shared TAB (teacher only) */}
-      {canSend && !annotateMode && !mirrorRisk && (
+      {canSend && !mirrorRisk && (
         <div
           onPointerDown={(e) => e.stopPropagation()}
           className="absolute right-2 top-1/2 z-[37] flex -translate-y-1/2 flex-col gap-1 rounded-lg bg-zinc-900/90 p-1 text-sm text-zinc-100 shadow-lg"
