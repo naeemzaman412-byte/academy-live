@@ -39,8 +39,15 @@ onmessage = (e) => {
   else { clearInterval(id); }
 };`;
 
+function isMobile() {
+  return typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 function pickMime(): string {
+  // Phones' gallery apps play .mp4 everywhere but often not .webm, so prefer mp4 there.
+  const mp4 = ["video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/mp4;codecs=avc1,opus", "video/mp4"];
   const candidates = [
+    ...(isMobile() ? mp4 : []),
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
     "video/webm",
@@ -70,8 +77,17 @@ export function isRecordingSupported() {
   );
 }
 
+export type SavedRecording = { url: string; name: string; sizeMB: number; mime: string };
+
 export type ClassRecorder = {
   supported: boolean;
+  /** Finished file waiting in memory (download / gallery buttons). */
+  lastFile: SavedRecording | null;
+  saveLast: () => void;
+  shareLast: () => void;
+  dismissLast: () => void;
+  /** true when the file is being written straight to a folder the user picked */
+  savingToDisk: boolean;
   recording: boolean;
   paused: boolean;
   seconds: number;
@@ -87,6 +103,11 @@ export function useClassRecorder(room: Room): ClassRecorder {
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [supported] = useState(isRecordingSupported);
+  const [lastFile, setLastFile] = useState<SavedRecording | null>(null);
+  const [savingToDisk, setSavingToDisk] = useState(false);
+  const writerRef = useRef<{ write: (b: Blob) => Promise<void>; close: () => Promise<void> } | null>(null);
+  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const fileNameRef = useRef("class-recording");
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
@@ -337,10 +358,38 @@ export function useClassRecorder(room: Room): ClassRecorder {
     camsRef.current = [];
   }, []);
 
-  const start = useCallback(() => {
+  const start = useCallback(async () => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") return;
     setError(null);
+    setLastFile(null);
     try {
+      const mimeType = pickMime();
+      mimeRef.current = mimeType || "video/webm";
+      const ext = mimeRef.current.includes("mp4") ? "mp4" : "webm";
+      fileNameRef.current = `class-recording-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}`;
+
+      // Desktop Chrome/Edge: let the teacher pick where to save and stream the
+      // video straight into that file while recording — nothing is lost even if
+      // the tab crashes, and long classes do not fill the browser's memory.
+      writerRef.current = null;
+      const w = window as unknown as {
+        showSaveFilePicker?: (o: unknown) => Promise<{ createWritable: () => Promise<{ write: (b: Blob) => Promise<void>; close: () => Promise<void> }> }>;
+      };
+      if (w.showSaveFilePicker && !isMobile()) {
+        try {
+          const handle = await w.showSaveFilePicker({
+            suggestedName: `${fileNameRef.current}.${ext}`,
+            types: [{ description: "ক্লাস রেকর্ডিং", accept: { [`video/${ext}`]: [`.${ext}`] } }],
+          });
+          writerRef.current = await handle.createWritable();
+          writeChainRef.current = Promise.resolve();
+        } catch {
+          // cancelled or not allowed here — fall back to saving in memory + download
+          writerRef.current = null;
+        }
+      }
+      setSavingToDisk(!!writerRef.current);
+
       const canvas = document.createElement("canvas");
       canvas.width = W;
       canvas.height = H;
@@ -377,8 +426,6 @@ export function useClassRecorder(room: Room): ClassRecorder {
         ...(audioDestRef.current?.stream.getAudioTracks() ?? []),
       ]);
 
-      const mimeType = pickMime();
-      mimeRef.current = mimeType || "video/webm";
       const recorder = new MediaRecorder(stream, {
         ...(mimeType ? { mimeType } : {}),
         videoBitsPerSecond: 3_000_000,
@@ -386,20 +433,38 @@ export function useClassRecorder(room: Room): ClassRecorder {
       });
       chunksRef.current = [];
       recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+        if (e.data.size === 0) return;
+        const wr = writerRef.current;
+        if (wr) {
+          writeChainRef.current = writeChainRef.current.then(() => wr.write(e.data)).catch(() => {});
+        } else {
+          chunksRef.current.push(e.data);
+        }
       };
       recorder.onstop = () => {
         const type = mimeRef.current.split(";")[0];
+        const fext = type.includes("mp4") ? "mp4" : "webm";
+        const wr = writerRef.current;
+        writerRef.current = null;
+        setSavingToDisk(false);
+        if (wr) {
+          // file is already on disk — just finish writing it
+          writeChainRef.current.then(() => wr.close()).catch(() => {});
+          chunksRef.current = [];
+          teardown();
+          return;
+        }
         const blob = new Blob(chunksRef.current, { type });
-        const ext = type.includes("mp4") ? "mp4" : "webm";
         const url = URL.createObjectURL(blob);
+        const name = `${fileNameRef.current}.${fext}`;
         const a = document.createElement("a");
         a.href = url;
-        a.download = `class-recording-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.${ext}`;
+        a.download = name;
         document.body.appendChild(a);
         a.click();
         a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 30_000);
+        // keep the file around so the "save again / share to gallery" buttons work
+        setLastFile({ url, name, sizeMB: Math.round((blob.size / 1048576) * 10) / 10, mime: type });
         chunksRef.current = [];
         teardown();
       };
@@ -482,7 +547,53 @@ export function useClassRecorder(room: Room): ClassRecorder {
     };
   }, [teardown]);
 
-  return { supported, recording, paused, seconds, error, start, stop, togglePause };
+  const saveLast = useCallback(() => {
+    if (!lastFile) return;
+    const a = document.createElement("a");
+    a.href = lastFile.url;
+    a.download = lastFile.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }, [lastFile]);
+
+  /** Phones: opens the share sheet so the video can be saved to Gallery / Google Photos. */
+  const shareLast = useCallback(async () => {
+    if (!lastFile) return;
+    try {
+      const blob = await fetch(lastFile.url).then((r) => r.blob());
+      const file = new File([blob], lastFile.name, { type: lastFile.mime });
+      const nav = navigator as Navigator & { canShare?: (d: unknown) => boolean };
+      if (nav.canShare?.({ files: [file] })) {
+        await nav.share({ files: [file], title: "ক্লাস রেকর্ডিং" });
+      } else {
+        saveLast();
+      }
+    } catch {
+      /* share sheet dismissed */
+    }
+  }, [lastFile, saveLast]);
+
+  const dismissLast = useCallback(() => {
+    if (lastFile) URL.revokeObjectURL(lastFile.url);
+    setLastFile(null);
+  }, [lastFile]);
+
+  return {
+    supported,
+    lastFile,
+    saveLast,
+    shareLast: () => void shareLast(),
+    dismissLast,
+    savingToDisk,
+    recording,
+    paused,
+    seconds,
+    error,
+    start: () => void start(),
+    stop,
+    togglePause,
+  };
 }
 
 export function formatClock(total: number) {

@@ -13,7 +13,7 @@ import {
   isTrackReference,
 } from "@livekit/components-react";
 import { ScreenSharePresets, Track } from "livekit-client";
-import RecordingControl from "@/components/RecordingControl";
+import RecordingControl, { RecordingReadyBar } from "@/components/RecordingControl";
 import ClassTimer from "@/components/ClassTimer";
 import ParticipantGrid from "@/components/ParticipantGrid";
 import ParticipantsPanel from "@/components/ParticipantsPanel";
@@ -327,6 +327,8 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
         linkCopied={linkCopied}
         onCopyLink={copyStudentLink}
       />
+
+      {isHost && <RecordingReadyBar recorder={recorder} />}
 
       {notice && (
         <div className="pointer-events-none absolute left-1/2 top-14 z-[70] -translate-x-1/2 rounded-lg bg-zinc-800 px-4 py-2 text-xs text-zinc-100 shadow-xl">

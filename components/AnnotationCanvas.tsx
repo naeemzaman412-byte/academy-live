@@ -106,14 +106,15 @@ export default function AnnotationCanvas({
     if (spot) {
       const cx = spot.x * canvas.width;
       const cy = spot.y * canvas.height;
-      const r = Math.max(18, Math.min(canvas.width, canvas.height) * 0.04);
-      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2.2);
-      g.addColorStop(0, "rgba(239,68,68,1)");
-      g.addColorStop(0.35, "rgba(239,68,68,0.85)");
+      // Small, soft red dot (like Zoom's spotlight) — never hides the text under it.
+      const r = 15;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, "rgba(255,40,40,0.85)");
+      g.addColorStop(0.45, "rgba(239,68,68,0.55)");
       g.addColorStop(1, "rgba(239,68,68,0)");
       ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(cx, cy, r * 2.2, 0, Math.PI * 2);
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill();
     }
   }, [getContentRect]);
