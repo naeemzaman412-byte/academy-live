@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { VideoTrack, useIsMuted, type TrackReference } from "@livekit/components-react";
+import { LockIcon } from "@/components/icons";
 import AnnotationCanvas, { type ContentRect } from "@/components/AnnotationCanvas";
 
 /**
@@ -20,7 +21,11 @@ export default function ScreenShareStage({
   onAnnotateModeChange,
   onStopShare,
   presenterName,
+  locked,
+  onToggleLock,
 }: {
+  locked: boolean;
+  onToggleLock: () => void;
   trackRef: TrackReference;
   isHost: boolean;
   isLocalShare: boolean;
@@ -62,6 +67,15 @@ export default function ScreenShareStage({
     return { left, top, width, height };
   }, []);
 
+  // The presenter resizing the shared window changes the video's aspect ratio —
+  // the browser fires "resize" on the <video>; re-measure so drawings stay aligned.
+  useEffect(() => {
+    const v = videoElRef.current;
+    if (!v) return;
+    v.addEventListener("resize", bump);
+    return () => v.removeEventListener("resize", bump);
+  }, [bump]);
+
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
@@ -97,13 +111,26 @@ export default function ScreenShareStage({
         resizeSignal={resizeSignal}
         annotateMode={annotateMode}
         onAnnotateModeChange={onAnnotateModeChange}
+        locked={locked}
       />
 
+      {/* While locked, swallow every touch on the stage so nothing changes by accident. */}
+      {locked && <div className="absolute inset-0 z-[26]" onPointerDown={(e) => e.stopPropagation()} />}
+
       {/* Zoom-style status pill */}
-      <div className="pointer-events-none absolute left-1/2 top-2 z-30 flex -translate-x-1/2 items-center gap-2">
+      <div className="pointer-events-none absolute left-1/2 top-2 z-[36] flex -translate-x-1/2 items-center gap-2">
         <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-emerald-600/95 px-3 py-1 text-xs font-medium text-white shadow-lg">
           <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
           {isLocalShare ? "আপনি স্ক্রিন শেয়ার করছেন" : `${presenterName} স্ক্রিন শেয়ার করছেন`}
+          <button
+            type="button"
+            onClick={onToggleLock}
+            className="ml-1 flex items-center gap-1 rounded-full bg-black/30 px-2.5 py-0.5 text-[11px] font-semibold hover:bg-black/50"
+            title={locked ? "স্ক্রিন আনলক করুন" : "স্ক্রিন লক করুন (ভুলে ছোঁয়া বন্ধ)"}
+          >
+            <LockIcon open={!locked} />
+            {locked ? "আনলক" : "লক"}
+          </button>
           {isLocalShare && (
             <button
               type="button"

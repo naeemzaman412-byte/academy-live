@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRoomContext } from "@livekit/components-react";
 import { RoomEvent } from "livekit-client";
-import { CloseIcon, HighlightIcon, PenIcon, TrashIcon, UndoIcon } from "@/components/icons";
+import { CloseIcon, HighlightIcon, PenIcon, SpotlightIcon, TrashIcon, UndoIcon } from "@/components/icons";
 
 export type ContentRect = { left: number; top: number; width: number; height: number };
 
@@ -17,6 +17,8 @@ type Stroke = {
 type WireMessage =
   | { t: "start"; id: string; x: number; y: number; color: string; width: number; hl?: boolean }
   | { t: "undo" }
+  | { t: "spot"; x: number; y: number }
+  | { t: "spotoff" }
   | { t: "move"; id: string; x: number; y: number }
   | { t: "end"; id: string }
   | { t: "clear" };
@@ -40,7 +42,9 @@ export default function AnnotationCanvas({
   resizeSignal,
   annotateMode,
   onAnnotateModeChange,
+  locked,
 }: {
+  locked: boolean;
   annotateMode: boolean;
   onAnnotateModeChange: (v: boolean) => void;
   isHost: boolean;
@@ -52,7 +56,11 @@ export default function AnnotationCanvas({
   const strokesRef = useRef<Map<string, Stroke>>(new Map());
   const drawingIdRef = useRef<string | null>(null);
 
-  const [highlighter, setHighlighter] = useState(false);
+  const [tool, setTool] = useState<"pen" | "highlighter" | "spotlight">("pen");
+  const highlighter = tool === "highlighter";
+  const spotRef = useRef<{ x: number; y: number } | null>(null);
+  const spotTimerRef = useRef<number | null>(null);
+  const lastRectRef = useRef("");
   const [color, setColor] = useState(COLORS[0]);
   const [lineWidth, setLineWidth] = useState(4);
 
@@ -92,7 +100,38 @@ export default function AnnotationCanvas({
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
+
+    // Spotlight: a glowing red dot where the teacher is touching / pointing.
+    const spot = spotRef.current;
+    if (spot) {
+      const cx = spot.x * canvas.width;
+      const cy = spot.y * canvas.height;
+      const r = Math.max(18, Math.min(canvas.width, canvas.height) * 0.04);
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2.2);
+      g.addColorStop(0, "rgba(239,68,68,1)");
+      g.addColorStop(0.35, "rgba(239,68,68,0.85)");
+      g.addColorStop(1, "rgba(239,68,68,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }, [getContentRect]);
+
+  // Safety net: the shared window can be resized by the presenter at any time
+  // (which changes the video's aspect ratio). Re-sync the canvas if the video's
+  // visible area changed, so drawings never drift from the real pointer.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const r = getContentRect();
+      const sig = r ? [r.left, r.top, r.width, r.height].map(Math.round).join(",") : "";
+      if (sig !== lastRectRef.current) {
+        lastRectRef.current = sig;
+        redraw();
+      }
+    }, 300);
+    return () => window.clearInterval(id);
+  }, [getContentRect, redraw]);
 
   // Redraw whenever the parent tells us the underlying video's layout changed.
   useEffect(() => {
@@ -133,6 +172,22 @@ export default function AnnotationCanvas({
       redraw();
       return;
     }
+    if (msg.t === "spot") {
+      spotRef.current = { x: msg.x, y: msg.y };
+      if (spotTimerRef.current !== null) window.clearTimeout(spotTimerRef.current);
+      // safety net: if the "off" packet is lost, hide the dot by itself
+      spotTimerRef.current = window.setTimeout(() => {
+        spotRef.current = null;
+        redraw();
+      }, 2500);
+      redraw();
+      return;
+    }
+    if (msg.t === "spotoff") {
+      spotRef.current = null;
+      redraw();
+      return;
+    }
     if (msg.t === "undo") {
       const last = Array.from(strokesRef.current.keys()).pop();
       if (last) strokesRef.current.delete(last);
@@ -164,26 +219,34 @@ export default function AnnotationCanvas({
 
   function publish(msg: WireMessage) {
     room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(msg)), {
-      reliable: true,
+      reliable: msg.t !== "spot",
       topic: ANNOTATION_TOPIC,
     });
   }
 
   function toNormalized(e: React.PointerEvent<HTMLCanvasElement>): { x: number; y: number } | null {
-    const rect = getContentRect();
-    if (!rect || rect.width === 0 || rect.height === 0) return null;
+    // Map the pointer using the canvas's OWN on-screen box, so what is drawn is
+    // always exactly under the finger / mouse, even if layout just changed.
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
     const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
     return { x, y };
   }
 
   function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (!isHost || !annotateMode) return;
+    if (!isHost || !annotateMode || locked) return;
     const p = toNormalized(e);
     if (!p) return;
+    (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
+    if (tool === "spotlight") {
+      drawingIdRef.current = "spot";
+      applyMessage({ t: "spot", x: p.x, y: p.y });
+      publish({ t: "spot", x: p.x, y: p.y });
+      return;
+    }
     const id = crypto.randomUUID();
     drawingIdRef.current = id;
-    (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
     const w = highlighter ? lineWidth * 4 : lineWidth;
     applyMessage({ t: "start", id, x: p.x, y: p.y, color, width: w, hl: highlighter });
     publish({ t: "start", id, x: p.x, y: p.y, color, width: w, hl: highlighter });
@@ -194,6 +257,11 @@ export default function AnnotationCanvas({
     if (!id) return;
     const p = toNormalized(e);
     if (!p) return;
+    if (id === "spot") {
+      applyMessage({ t: "spot", x: p.x, y: p.y });
+      publish({ t: "spot", x: p.x, y: p.y });
+      return;
+    }
     applyMessage({ t: "move", id, x: p.x, y: p.y });
     publish({ t: "move", id, x: p.x, y: p.y });
   }
@@ -202,6 +270,11 @@ export default function AnnotationCanvas({
     const id = drawingIdRef.current;
     if (!id) return;
     drawingIdRef.current = null;
+    if (id === "spot") {
+      applyMessage({ t: "spotoff" });
+      publish({ t: "spotoff" });
+      return;
+    }
     applyMessage({ t: "end", id });
     publish({ t: "end", id });
   }
@@ -228,22 +301,29 @@ export default function AnnotationCanvas({
         onPointerCancel={handlePointerUp}
         style={{
           position: "absolute",
-          pointerEvents: isHost && annotateMode ? "auto" : "none",
+          pointerEvents: isHost && annotateMode && !locked ? "auto" : "none",
           touchAction: "none",
           zIndex: 20,
         }}
       />
-      {isHost && annotateMode && (
+      {isHost && annotateMode && !locked && (
         <div className="absolute left-2 top-1/2 z-30 flex max-h-[90%] -translate-y-1/2 flex-col items-center gap-1.5 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900/95 p-1.5 text-xs shadow-xl">
           <button
-            onClick={() => setHighlighter(false)}
-            className={`rounded-lg p-2 ${!highlighter ? "bg-indigo-600 text-white" : "text-zinc-300 hover:bg-zinc-700"}`}
+            onClick={() => setTool("spotlight")}
+            className={`rounded-lg p-2 ${tool === "spotlight" ? "bg-indigo-600 text-white" : "text-zinc-300 hover:bg-zinc-700"}`}
+            title="স্পটলাইট — যেখানে ছোঁবেন সেখানে লাল আলো দেখাবে"
+          >
+            <SpotlightIcon />
+          </button>
+          <button
+            onClick={() => setTool("pen")}
+            className={`rounded-lg p-2 ${tool === "pen" ? "bg-indigo-600 text-white" : "text-zinc-300 hover:bg-zinc-700"}`}
             title="কলম"
           >
             <PenIcon />
           </button>
           <button
-            onClick={() => setHighlighter(true)}
+            onClick={() => setTool("highlighter")}
             className={`rounded-lg p-2 ${highlighter ? "bg-indigo-600 text-white" : "text-zinc-300 hover:bg-zinc-700"}`}
             title="হাইলাইটার"
           >

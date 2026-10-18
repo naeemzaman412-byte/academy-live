@@ -157,7 +157,8 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
   const [pipBlocked, setPipBlocked] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
-  const [canShareScreen] = useState(
+  const [locked, setLocked] = useState(false);
+  const [shareSupported] = useState(
     () => typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getDisplayMedia === "function"
   );
 
@@ -173,6 +174,7 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
   const isLocalShare = !!activeScreenShare?.participant.isLocal;
   // derived, so they reset by themselves when the share ends
   const annotatingOn = annotating && !!activeScreenShare;
+  const lockedOn = locked && !!activeScreenShare;
   const pausedOn = sharePaused && isScreenShareEnabled;
 
   function flash(msg: string) {
@@ -197,6 +199,12 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
   }
 
   async function toggleShare() {
+    if (!isScreenShareEnabled && !shareSupported) {
+      flash(
+        "মোবাইল ব্রাউজার (Chrome/Safari) স্ক্রিন শেয়ার সমর্থন করে না — এটা ব্রাউজারের সীমাবদ্ধতা। স্ক্রিন শেয়ার করতে ল্যাপটপ/পিসির Chrome ব্যবহার করুন; মোবাইল থেকে ক্যামেরা, মাইক, চ্যাট, আঁকা ও স্পটলাইট সবই চলবে।"
+      );
+      return;
+    }
     try {
       if (isScreenShareEnabled) {
         await localParticipant.setScreenShareEnabled(false);
@@ -254,6 +262,35 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
     room.disconnect();
     router.replace("/");
   }
+
+  // Keep the phone/laptop screen awake during class so it never auto-locks
+  // (and drops out of the call) while the teacher is talking.
+  useEffect(() => {
+    type WL = { release: () => Promise<void> };
+    const nav = navigator as unknown as { wakeLock?: { request: (t: "screen") => Promise<WL> } };
+    if (!nav.wakeLock) return;
+    let lock: WL | null = null;
+    let cancelled = false;
+    const acquire = () => {
+      nav.wakeLock?.request("screen").then(
+        (l) => {
+          if (cancelled) l.release().catch(() => {});
+          else lock = l;
+        },
+        () => {}
+      );
+    };
+    const onVis = () => {
+      if (document.visibilityState === "visible") acquire();
+    };
+    acquire();
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVis);
+      lock?.release().catch(() => {});
+    };
+  }, []);
 
   // Floating (always-on-top) Zoom-style controls while this user shares.
   const { open: openPip, close: closePip, supported: pipSupported, pipWindow } = pip;
@@ -321,6 +358,8 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
                   onAnnotateModeChange={setAnnotating}
                   onStopShare={toggleShare}
                   presenterName={activeScreenShare.participant.name || activeScreenShare.participant.identity}
+                  locked={lockedOn}
+                  onToggleLock={() => setLocked(!lockedOn)}
                 />
                 {showFloating && <FloatingCameraStrip tracks={cameraTracks} mode="floating" />}
               </>
@@ -360,13 +399,14 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
         </aside>
       </div>
 
+      <div className={lockedOn ? "pointer-events-none opacity-50" : ""}>
       <MeetingToolbar
         isHost={isHost}
         micOn={isMicrophoneEnabled}
         camOn={isCameraEnabled}
         sharing={isScreenShareEnabled}
         sharePaused={pausedOn}
-        canShareScreen={canShareScreen}
+        canShareScreen
         annotating={annotatingOn}
         participantCount={participants.length}
         unreadChat={unreadChat}
@@ -393,6 +433,7 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
         linkCopied={linkCopied}
         onLeave={leave}
       />
+      </div>
 
       {pipWindow &&
         createPortal(

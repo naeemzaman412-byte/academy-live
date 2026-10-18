@@ -61,7 +61,7 @@ export function TBtn({
       disabled={disabled}
       title={title ?? label}
       aria-label={label}
-      className={`relative flex min-w-11 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 transition disabled:opacity-40 sm:min-w-14 sm:px-2.5 ${tone}`}
+      className={`relative flex min-w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 transition disabled:opacity-40 sm:min-w-14 sm:px-2.5 ${tone}`}
     >
       {icon}
       <span className={`text-[10px] leading-tight sm:text-[11px] ${hideLabelOnMobile ? "hidden min-[420px]:block" : ""}`}>

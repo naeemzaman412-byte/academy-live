@@ -130,3 +130,15 @@ export const FullscreenIcon = () => (
     <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
   </Svg>
 );
+export const SpotlightIcon = () => (
+  <Svg size={18}>
+    <circle cx="12" cy="12" r="3" fill="currentColor" />
+    <path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8" />
+  </Svg>
+);
+export const LockIcon = ({ open }: { open?: boolean }) => (
+  <Svg size={16}>
+    <rect x="5" y="11" width="14" height="9" rx="2" />
+    <path d={open ? "M8 11V8a4 4 0 0 1 7.5-2" : "M8 11V8a4 4 0 0 1 8 0v3"} />
+  </Svg>
+);
