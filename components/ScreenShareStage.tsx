@@ -145,11 +145,17 @@ export default function ScreenShareStage({
   // Scroll the SHARED TAB from this preview (Chrome 136+, only for tab shares).
   const [scrollOn, setScrollOn] = useState(false);
   const [scrollMsg, setScrollMsg] = useState<string | null>(null);
-  const cc = captureController as { forwardWheel?: (el: HTMLElement) => Promise<void> } | undefined;
+  type CC = {
+    forwardWheel?: (el: HTMLElement) => Promise<void>;
+    sendWheel?: (a: { x: number; y: number; wheelDeltaX: number; wheelDeltaY: number }) => Promise<void>;
+  };
+  const cc = captureController as CC | undefined;
   const canForward = isLocalShare && surface === "browser" && typeof cc?.forwardWheel === "function";
+  const canSend = isLocalShare && surface === "browser" && typeof cc?.sendWheel === "function";
 
   async function enableScroll() {
-    const el = videoElRef.current;
+    // attach to the whole stage (not just the <video>) so overlays never swallow the wheel
+    const el = wrapperRef.current;
     if (!cc?.forwardWheel || !el) return;
     try {
       await cc.forwardWheel(el);
@@ -159,6 +165,49 @@ export default function ScreenShareStage({
       setScrollMsg("অনুমতি পাওয়া যায়নি — আবার চেষ্টা করে \"অনুমতি দিন\" চাপুন");
     }
   }
+
+  /** Scroll the shared TAB by `dy` (positive = down). Used by the ▲▼ buttons and the keyboard. */
+  const scrollShared = useCallback(
+    async (dy: number) => {
+      const c = captureController as CC | undefined;
+      const v = videoElRef.current;
+      if (!c?.sendWheel) return;
+      try {
+        await c.sendWheel({
+          x: Math.round((v?.videoWidth || 800) / 2),
+          y: Math.round((v?.videoHeight || 600) / 2),
+          wheelDeltaX: 0,
+          wheelDeltaY: -dy,
+        });
+        setScrollMsg(null);
+      } catch {
+        setScrollMsg("স্ক্রল করা যায়নি — ব্রাউজারের অনুমতি দিন (শেয়ার করা ট্যাব খোলা আছে কিনা দেখুন)");
+      }
+    },
+    [captureController]
+  );
+
+  // Keyboard paging while the class page is focused: PageUp/PageDown, arrows, Space.
+  useEffect(() => {
+    if (!canSend) return;
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      const map: Record<string, number> = {
+        PageDown: 800,
+        PageUp: -800,
+        ArrowDown: 120,
+        ArrowUp: -120,
+        " ": e.shiftKey ? -800 : 800,
+      };
+      const dy = map[e.key];
+      if (dy === undefined) return;
+      e.preventDefault();
+      void scrollShared(dy);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canSend, scrollShared]);
 
   const canMove = !locked && !annotateMode && !scrollOn;
 
@@ -253,15 +302,15 @@ export default function ScreenShareStage({
         >
           {canForward ? (
             scrollOn ? (
-              <span className="text-emerald-400">✓ এই প্রিভিউর ওপর মাউস-হুইল ঘোরালে শেয়ার করা ট্যাব স্ক্রল হবে</span>
+              <span className="text-emerald-400">✓ মাউস-হুইল, ডান পাশের ⇈ ▲ ▼ ⇊ বোতাম অথবা PageUp/PageDown দিয়ে ট্যাব স্ক্রল হবে</span>
             ) : (
               <button type="button" onClick={enableScroll} className="font-medium text-emerald-400 underline">
-                ↕ এই প্রিভিউ থেকেই স্ক্রল চালু করুন
+                ↕ মাউস-হুইল স্ক্রল চালু করুন (ডান পাশের ⇈ ▲ ▼ ⇊ বোতাম এমনিতেই কাজ করে)
               </button>
             )
-          ) : surface === "window" ? (
+          ) : surface === "window" || surface === "monitor" ? (
             <span>
-              স্ক্রল করতে মূল উইন্ডোতে যান। প্রিভিউ থেকে স্ক্রল চাইলে PDF/ডকুমেন্টটা <b>Chrome ট্যাবে</b> খুলে সেই <b>ট্যাব</b> শেয়ার করুন।
+              উইন্ডো/পুরো স্ক্রিন শেয়ারে ব্রাউজার অন্য অ্যাপ স্ক্রল করতে পারে না। ক্লাস থেকেই পেজ বদলাতে PDF/ডকুমেন্টটা <b>Chrome ট্যাবে</b> খুলে শেয়ার করার সময় <b>“Chrome ট্যাব”</b> বেছে নিন — তখন এখানে পেজ-বোতাম আসবে।
             </span>
           ) : null}
           {scrollMsg && <div className="mt-1 text-amber-300">{scrollMsg}</div>}
@@ -277,6 +326,19 @@ export default function ScreenShareStage({
               আঁকা ও স্পটলাইট ব্যবহার করতে শেয়ার বন্ধ করে শুধু একটি উইন্ডো (Word / PDF) শেয়ার করুন।
             </p>
           </div>
+        </div>
+      )}
+
+      {/* page / scroll buttons for the shared TAB (teacher only) */}
+      {canSend && !annotateMode && !mirrorRisk && (
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute right-2 top-1/2 z-[37] flex -translate-y-1/2 flex-col gap-1 rounded-lg bg-zinc-900/90 p-1 text-sm text-zinc-100 shadow-lg"
+        >
+          <button type="button" onClick={() => scrollShared(-800)} className="h-9 w-12 rounded hover:bg-zinc-700" title="আগের পেজ (PageUp)">⇈</button>
+          <button type="button" onClick={() => scrollShared(-120)} className="h-9 w-12 rounded hover:bg-zinc-700" title="একটু ওপরে (↑)">▲</button>
+          <button type="button" onClick={() => scrollShared(120)} className="h-9 w-12 rounded hover:bg-zinc-700" title="একটু নিচে (↓)">▼</button>
+          <button type="button" onClick={() => scrollShared(800)} className="h-9 w-12 rounded hover:bg-zinc-700" title="পরের পেজ (PageDown)">⇊</button>
         </div>
       )}
 
