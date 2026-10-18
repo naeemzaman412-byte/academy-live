@@ -357,6 +357,13 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
     setDrawOpen(false);
   }
 
+  /** Let the mouse wheel over the floating board scroll the shared TAB (Chrome 136+, tab shares only). */
+  async function forwardWheelTo(el: HTMLElement) {
+    const c = captureController as { forwardWheel?: (el: HTMLElement) => Promise<void> } | undefined;
+    if (!c?.forwardWheel) throw new Error("unsupported");
+    await c.forwardWheel(el);
+  }
+
   /** Scroll the shared TAB (Chrome 136+, tab shares only). dy > 0 = down. */
   async function scrollSharedTab(dy: number) {
     const c = captureController as
@@ -497,7 +504,7 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
       {pipWindow &&
         createPortal(
           drawOn && activeScreenShare ? (
-            <PipDrawBoard trackRef={activeScreenShare} onClose={closePipDraw} onScroll={scrollSharedTab} />
+            <PipDrawBoard trackRef={activeScreenShare} onClose={closePipDraw} onScroll={scrollSharedTab} onForwardWheel={forwardWheelTo} />
           ) : (
           <FloatingShareBar
             onDraw={isHost && isLocalShare ? openPipDraw : undefined}
