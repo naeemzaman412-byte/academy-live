@@ -2,22 +2,40 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
 import {
   LiveKitRoom,
   RoomAudioRenderer,
-  ControlBar,
-  Chat,
+  useLocalParticipant,
+  useParticipants,
   useRoomContext,
   useTracks,
   isTrackReference,
 } from "@livekit/components-react";
-import { Track } from "livekit-client";
+import { ScreenSharePresets, Track } from "livekit-client";
 import RecordingControl from "@/components/RecordingControl";
 import ClassTimer from "@/components/ClassTimer";
-import HostParticipantPanel from "@/components/HostParticipantPanel";
 import ParticipantGrid from "@/components/ParticipantGrid";
+import ParticipantsPanel from "@/components/ParticipantsPanel";
+import ClassChat from "@/components/ClassChat";
 import ScreenShareStage from "@/components/ScreenShareStage";
 import FloatingCameraStrip from "@/components/FloatingCameraStrip";
+import MeetingToolbar, { FloatingShareBar, type VideoPanelMode } from "@/components/MeetingToolbar";
+import { CloseIcon } from "@/components/icons";
+import { useClassRecorder } from "@/components/useClassRecorder";
+import { usePip } from "@/components/usePip";
+
+// Student links must never point at a Vercel *preview* deployment (those land
+// on Vercel's login page). On the normal production URL we just use the
+// current origin; on a preview URL we fall back to the production address.
+const PRODUCTION_ORIGIN =
+  process.env.NEXT_PUBLIC_APP_URL || "https://academy-live-blond.vercel.app";
+
+function shareOrigin() {
+  const { hostname, origin } = window.location;
+  const isPreview = /-git-/.test(hostname) || /-[a-z0-9]{8,}-[a-z0-9-]+\.vercel\.app$/.test(hostname);
+  return isPreview ? PRODUCTION_ORIGIN : origin;
+}
 
 type StoredJoinInfo = {
   name: string;
@@ -120,7 +138,28 @@ export default function ClassRoom({ roomName }: { roomName: string }) {
 }
 
 function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) {
-  const [chatOpen, setChatOpen] = useState(false);
+  const room = useRoomContext();
+  const router = useRouter();
+  const { localParticipant, isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } =
+    useLocalParticipant();
+  const participants = useParticipants();
+  const recorder = useClassRecorder(room);
+  const pip = usePip();
+
+  const [panel, setPanel] = useState<"chat" | "participants" | null>(null);
+  const [unreadChat, setUnreadChat] = useState(0);
+  const [videoMode, setVideoMode] = useState<VideoPanelMode>("floating");
+  const [annotating, setAnnotating] = useState(false);
+  const [sharePaused, setSharePaused] = useState(false);
+  const [shareSound, setShareSound] = useState(true);
+  const [optimizeVideo, setOptimizeVideo] = useState(false);
+  const [floatHidden, setFloatHidden] = useState(false);
+  const [pipBlocked, setPipBlocked] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [canShareScreen] = useState(
+    () => typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getDisplayMedia === "function"
+  );
 
   const screenShareTracks = useTracks([{ source: Track.Source.ScreenShare, withPlaceholder: false }], {
     onlySubscribed: false,
@@ -131,33 +170,248 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
 
   const firstScreenShare = screenShareTracks[0];
   const activeScreenShare = firstScreenShare && isTrackReference(firstScreenShare) ? firstScreenShare : null;
+  const isLocalShare = !!activeScreenShare?.participant.isLocal;
+  // derived, so they reset by themselves when the share ends
+  const annotatingOn = annotating && !!activeScreenShare;
+  const pausedOn = sharePaused && isScreenShareEnabled;
+
+  function flash(msg: string) {
+    setNotice(msg);
+    window.setTimeout(() => setNotice((n) => (n === msg ? null : n)), 4500);
+  }
+
+  async function toggleMic() {
+    try {
+      await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
+    } catch {
+      flash("মাইক চালু করা যায়নি — ব্রাউজারের মাইক পারমিশন দিন");
+    }
+  }
+
+  async function toggleCam() {
+    try {
+      await localParticipant.setCameraEnabled(!isCameraEnabled);
+    } catch {
+      flash("ক্যামেরা চালু করা যায়নি — ব্রাউজারের ক্যামেরা পারমিশন দিন");
+    }
+  }
+
+  async function toggleShare() {
+    try {
+      if (isScreenShareEnabled) {
+        await localParticipant.setScreenShareEnabled(false);
+        setSharePaused(false);
+      } else {
+        setSharePaused(false);
+        await localParticipant.setScreenShareEnabled(true, {
+          audio: shareSound,
+          contentHint: optimizeVideo ? "motion" : "detail",
+          resolution: (optimizeVideo ? ScreenSharePresets.h1080fps30 : ScreenSharePresets.h1080fps15).resolution,
+        });
+        setFloatHidden(false);
+      }
+    } catch (err) {
+      // user cancelled the browser's picker — nothing to report
+      if (err instanceof Error && err.name !== "NotAllowedError") flash("স্ক্রিন শেয়ার শুরু করা যায়নি");
+    }
+  }
+
+  async function togglePauseShare() {
+    const pub = localParticipant.getTrackPublication(Track.Source.ScreenShare);
+    if (!pub) return;
+    try {
+      if (pausedOn) await pub.unmute();
+      else await pub.mute();
+      setSharePaused(!pausedOn);
+    } catch {
+      flash("শেয়ার পজ করা যায়নি");
+    }
+  }
+
+  function togglePanel(p: "chat" | "participants") {
+    setPanel((cur) => (cur === p ? null : p));
+  }
+
+  function fullscreen() {
+    try {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen?.();
+    } catch {
+      /* not supported (e.g. iPhone Safari) */
+    }
+  }
+
+  function copyStudentLink() {
+    const url = `${shareOrigin()}/?room=${encodeURIComponent(roomName)}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    });
+  }
+
+  function leave() {
+    if (recorder.recording && !window.confirm("রেকর্ডিং চলছে। ক্লাস ছাড়লে রেকর্ডিং সেভ হয়ে যাবে। ছাড়বেন?")) return;
+    room.disconnect();
+    router.replace("/");
+  }
+
+  // Floating (always-on-top) Zoom-style controls while this user shares.
+  const { open: openPip, close: closePip, supported: pipSupported, pipWindow } = pip;
+  useEffect(() => {
+    if (isScreenShareEnabled && pipSupported && !floatHidden) {
+      openPip().then((ok) => setPipBlocked(!ok));
+    } else {
+      closePip();
+    }
+  }, [isScreenShareEnabled, pipSupported, floatHidden, openPip, closePip]);
+
+  // Ctrl+Alt+Shift+H toggles the floating controls (same as Zoom).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.ctrlKey && e.altKey && e.shiftKey && e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        setFloatHidden((v) => !v);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const showStrip = !!activeScreenShare && videoMode === "strip";
+  const showFloating = !!activeScreenShare && videoMode === "floating";
 
   return (
     <>
       <RoomHeader
         roomName={roomName}
         isHost={isHost}
-        chatOpen={chatOpen}
-        onToggleChat={() => setChatOpen((v) => !v)}
+        count={participants.length}
+        recorder={recorder}
+        linkCopied={linkCopied}
+        onCopyLink={copyStudentLink}
       />
-      <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex" }}>
-        <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-          {activeScreenShare ? (
-            <>
-              <ScreenShareStage trackRef={activeScreenShare} isHost={isHost} />
-              <FloatingCameraStrip tracks={cameraTracks} />
-            </>
-          ) : (
-            <ParticipantGrid />
-          )}
+
+      {notice && (
+        <div className="pointer-events-none absolute left-1/2 top-14 z-[70] -translate-x-1/2 rounded-lg bg-zinc-800 px-4 py-2 text-xs text-zinc-100 shadow-xl">
+          {notice}
         </div>
-        {chatOpen && (
-          <div style={{ width: 320, flexShrink: 0, borderLeft: "1px solid #27272a" }}>
-            <Chat style={{ height: "100%" }} />
+      )}
+
+      {isScreenShareEnabled && pipSupported && !pipWindow && !floatHidden && pipBlocked && (
+        <button
+          type="button"
+          onClick={() => openPip().then((ok) => setPipBlocked(!ok))}
+          className="border-b border-emerald-700 bg-emerald-600/20 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-600/30"
+        >
+          ▣ ভাসমান কন্ট্রোল বার খুলুন — অন্য উইন্ডোতে গেলেও মাইক, ভিডিও, রেকর্ড ও শেয়ার বন্ধের বাটন সামনে থাকবে
+        </button>
+      )}
+
+      <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex" }}>
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          {showStrip && <FloatingCameraStrip tracks={cameraTracks} mode="strip" />}
+          <div className="relative min-h-0 flex-1">
+            {activeScreenShare ? (
+              <>
+                <ScreenShareStage
+                  trackRef={activeScreenShare}
+                  isHost={isHost}
+                  isLocalShare={isLocalShare}
+                  annotateMode={annotatingOn}
+                  onAnnotateModeChange={setAnnotating}
+                  onStopShare={toggleShare}
+                  presenterName={activeScreenShare.participant.name || activeScreenShare.participant.identity}
+                />
+                {showFloating && <FloatingCameraStrip tracks={cameraTracks} mode="floating" />}
+              </>
+            ) : (
+              <ParticipantGrid />
+            )}
           </div>
-        )}
+        </div>
+
+        {/* Side panel on desktop, full-screen sheet on phones. Chat stays mounted so no message is lost. */}
+        <aside
+          className={
+            panel
+              ? "absolute inset-0 z-50 flex flex-col bg-zinc-950 md:static md:inset-auto md:w-80 md:shrink-0 md:border-l md:border-zinc-800"
+              : "hidden"
+          }
+        >
+          <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-sm font-medium">
+            <span>{panel === "chat" ? "চ্যাট" : `অংশগ্রহণকারী (${participants.length})`}</span>
+            <button
+              type="button"
+              onClick={() => setPanel(null)}
+              className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              aria-label="বন্ধ করুন"
+            >
+              <CloseIcon />
+            </button>
+          </div>
+          <div className={panel === "chat" ? "min-h-0 flex-1" : "hidden"}>
+            <ClassChat open={panel === "chat"} onUnreadChange={setUnreadChat} />
+          </div>
+          {panel === "participants" && (
+            <div className="min-h-0 flex-1">
+              <ParticipantsPanel roomName={roomName} isHost={isHost} />
+            </div>
+          )}
+        </aside>
       </div>
-      <ControlBar controls={{ microphone: true, camera: true, screenShare: true, chat: false, leave: true }} />
+
+      <MeetingToolbar
+        isHost={isHost}
+        micOn={isMicrophoneEnabled}
+        camOn={isCameraEnabled}
+        sharing={isScreenShareEnabled}
+        sharePaused={pausedOn}
+        canShareScreen={canShareScreen}
+        annotating={annotatingOn}
+        participantCount={participants.length}
+        unreadChat={unreadChat}
+        panel={panel}
+        videoMode={videoMode}
+        hasShareOnStage={!!activeScreenShare}
+        recorder={recorder}
+        shareSound={shareSound}
+        optimizeVideo={optimizeVideo}
+        floatingControlsSupported={pipSupported}
+        floatingControlsHidden={floatHidden}
+        onToggleMic={toggleMic}
+        onToggleCam={toggleCam}
+        onToggleShare={toggleShare}
+        onTogglePauseShare={togglePauseShare}
+        onToggleAnnotate={() => setAnnotating(!annotatingOn)}
+        onTogglePanel={togglePanel}
+        onVideoMode={setVideoMode}
+        onToggleShareSound={() => setShareSound((v) => !v)}
+        onToggleOptimize={() => setOptimizeVideo((v) => !v)}
+        onToggleFloatingControls={() => setFloatHidden((v) => !v)}
+        onFullscreen={fullscreen}
+        onCopyLink={isHost ? copyStudentLink : undefined}
+        linkCopied={linkCopied}
+        onLeave={leave}
+      />
+
+      {pipWindow &&
+        createPortal(
+          <FloatingShareBar
+            micOn={isMicrophoneEnabled}
+            camOn={isCameraEnabled}
+            sharePaused={pausedOn}
+            recorder={recorder}
+            isHost={isHost}
+            participantCount={participants.length}
+            onToggleMic={toggleMic}
+            onToggleCam={toggleCam}
+            onTogglePauseShare={togglePauseShare}
+            onStopShare={toggleShare}
+            onShowMeeting={() => window.focus()}
+            onHide={() => setFloatHidden(true)}
+          />,
+          pipWindow.document.body
+        )}
     </>
   );
 }
@@ -165,65 +419,35 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
 function RoomHeader({
   roomName,
   isHost,
-  chatOpen,
-  onToggleChat,
+  count,
+  recorder,
+  linkCopied,
+  onCopyLink,
 }: {
   roomName: string;
   isHost: boolean;
-  chatOpen: boolean;
-  onToggleChat: () => void;
+  count: number;
+  recorder: ReturnType<typeof useClassRecorder>;
+  linkCopied: boolean;
+  onCopyLink: () => void;
 }) {
-  const room = useRoomContext();
-  const [participantCount, setParticipantCount] = useState(1);
-  const [linkCopied, setLinkCopied] = useState(false);
-
-  useEffect(() => {
-    function updateCount() {
-      setParticipantCount(room.numParticipants);
-    }
-    updateCount();
-    room.on("participantConnected", updateCount);
-    room.on("participantDisconnected", updateCount);
-    return () => {
-      room.off("participantConnected", updateCount);
-      room.off("participantDisconnected", updateCount);
-    };
-  }, [room]);
-
-  function copyStudentLink() {
-    const url = `${window.location.origin}/?room=${encodeURIComponent(roomName)}`;
-    navigator.clipboard.writeText(url).then(() => {
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
-    });
-  }
-
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950 px-4 py-2 text-sm">
-      <div className="flex items-center gap-3 truncate">
-        <span className="font-medium truncate">{roomName}</span>
-        <span className="text-zinc-500">{participantCount} জন যুক্ত আছেন</span>
+    <div className="flex items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-950 px-3 py-2 text-sm">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="truncate font-medium">{roomName}</span>
+        <span className="shrink-0 text-zinc-500">{count} জন</span>
         <ClassTimer />
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
+        {isHost && <RecordingControl recorder={recorder} />}
         {isHost && (
           <button
-            onClick={copyStudentLink}
-            className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
+            onClick={onCopyLink}
+            className="hidden rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800 sm:block"
           >
-            {linkCopied ? "✓ লিংক কপি হয়েছে" : "🔗 স্টুডেন্ট লিংক শেয়ার করুন"}
+            {linkCopied ? "✓ লিংক কপি হয়েছে" : "🔗 স্টুডেন্ট লিংক"}
           </button>
         )}
-        <button
-          onClick={onToggleChat}
-          className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
-            chatOpen ? "border-indigo-500 bg-indigo-500/10 text-indigo-300" : "border-zinc-700 text-zinc-200 hover:bg-zinc-800"
-          }`}
-        >
-          💬 চ্যাট
-        </button>
-        {isHost && <HostParticipantPanel roomName={roomName} />}
-        {isHost && <RecordingControl />}
       </div>
     </div>
   );

@@ -14,15 +14,29 @@ import { useChat } from "@livekit/components-react";
  * call). Message state is local to this component and never touches the
  * room connection lifecycle.
  */
-export default function ClassChat() {
+export default function ClassChat({
+  open,
+  onUnreadChange,
+}: {
+  open: boolean;
+  onUnreadChange?: (n: number) => void;
+}) {
   const { chatMessages, send, isSending } = useChat();
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement | null>(null);
 
+  // The panel stays mounted (just hidden) so no message is ever lost, and we
+  // count the ones that arrived while it was closed for the unread badge.
+  const seenRef = useRef(0);
+  useEffect(() => {
+    if (open) seenRef.current = chatMessages.length;
+    onUnreadChange?.(open ? 0 : Math.max(0, chatMessages.length - seenRef.current));
+  }, [open, chatMessages.length, onUnreadChange]);
+
   useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [chatMessages]);
+  }, [chatMessages, open]);
 
   async function sendDraft(e?: React.SyntheticEvent) {
     // Stop this from ever behaving like a real form submission — no reload,

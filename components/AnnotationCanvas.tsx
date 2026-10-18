@@ -3,17 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRoomContext } from "@livekit/components-react";
 import { RoomEvent } from "livekit-client";
+import { CloseIcon, HighlightIcon, PenIcon, TrashIcon, UndoIcon } from "@/components/icons";
 
 export type ContentRect = { left: number; top: number; width: number; height: number };
 
 type Stroke = {
   color: string;
   width: number;
+  hl?: boolean;
   points: { x: number; y: number }[];
 };
 
 type WireMessage =
-  | { t: "start"; id: string; x: number; y: number; color: string; width: number }
+  | { t: "start"; id: string; x: number; y: number; color: string; width: number; hl?: boolean }
+  | { t: "undo" }
   | { t: "move"; id: string; x: number; y: number }
   | { t: "end"; id: string }
   | { t: "clear" };
@@ -35,7 +38,11 @@ export default function AnnotationCanvas({
   isHost,
   getContentRect,
   resizeSignal,
+  annotateMode,
+  onAnnotateModeChange,
 }: {
+  annotateMode: boolean;
+  onAnnotateModeChange: (v: boolean) => void;
   isHost: boolean;
   getContentRect: () => ContentRect | null;
   resizeSignal: number;
@@ -45,7 +52,7 @@ export default function AnnotationCanvas({
   const strokesRef = useRef<Map<string, Stroke>>(new Map());
   const drawingIdRef = useRef<string | null>(null);
 
-  const [annotateMode, setAnnotateMode] = useState(false);
+  const [highlighter, setHighlighter] = useState(false);
   const [color, setColor] = useState(COLORS[0]);
   const [lineWidth, setLineWidth] = useState(4);
 
@@ -54,8 +61,11 @@ export default function AnnotationCanvas({
     const rect = getContentRect();
     if (!canvas || !rect || rect.width === 0 || rect.height === 0) return;
 
-    canvas.style.left = `${rect.left}px`;
-    canvas.style.top = `${rect.top}px`;
+    // rect is in viewport coordinates; the canvas is absolutely positioned
+    // inside its (relative) parent, so convert to parent-relative offsets.
+    const parentRect = canvas.parentElement?.getBoundingClientRect();
+    canvas.style.left = `${rect.left - (parentRect?.left ?? 0)}px`;
+    canvas.style.top = `${rect.top - (parentRect?.top ?? 0)}px`;
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
     canvas.width = Math.round(rect.width);
@@ -67,6 +77,7 @@ export default function AnnotationCanvas({
 
     for (const stroke of strokesRef.current.values()) {
       if (stroke.points.length < 1) continue;
+      ctx.globalAlpha = stroke.hl ? 0.35 : 1;
       ctx.strokeStyle = stroke.color;
       ctx.lineWidth = stroke.width;
       ctx.lineCap = "round";
@@ -80,6 +91,7 @@ export default function AnnotationCanvas({
       });
       ctx.stroke();
     }
+    ctx.globalAlpha = 1;
   }, [getContentRect]);
 
   // Redraw whenever the parent tells us the underlying video's layout changed.
@@ -121,10 +133,17 @@ export default function AnnotationCanvas({
       redraw();
       return;
     }
+    if (msg.t === "undo") {
+      const last = Array.from(strokesRef.current.keys()).pop();
+      if (last) strokesRef.current.delete(last);
+      redraw();
+      return;
+    }
     if (msg.t === "start") {
       strokesRef.current.set(msg.id, {
         color: msg.color,
         width: msg.width,
+        hl: msg.hl,
         points: [{ x: msg.x, y: msg.y }],
       });
       redraw();
@@ -165,8 +184,9 @@ export default function AnnotationCanvas({
     const id = crypto.randomUUID();
     drawingIdRef.current = id;
     (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
-    applyMessage({ t: "start", id, x: p.x, y: p.y, color, width: lineWidth });
-    publish({ t: "start", id, x: p.x, y: p.y, color, width: lineWidth });
+    const w = highlighter ? lineWidth * 4 : lineWidth;
+    applyMessage({ t: "start", id, x: p.x, y: p.y, color, width: w, hl: highlighter });
+    publish({ t: "start", id, x: p.x, y: p.y, color, width: w, hl: highlighter });
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -186,6 +206,11 @@ export default function AnnotationCanvas({
     publish({ t: "end", id });
   }
 
+  function handleUndo() {
+    applyMessage({ t: "undo" });
+    publish({ t: "undo" });
+  }
+
   function handleClear() {
     applyMessage({ t: "clear" });
     publish({ t: "clear" });
@@ -195,10 +220,12 @@ export default function AnnotationCanvas({
     <>
       <canvas
         ref={canvasRef}
+        data-annotation-canvas="true"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         style={{
           position: "absolute",
           pointerEvents: isHost && annotateMode ? "auto" : "none",
@@ -206,48 +233,56 @@ export default function AnnotationCanvas({
           zIndex: 20,
         }}
       />
-      {isHost && (
-        <div className="absolute right-2 top-2 z-30 flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/90 px-2 py-1.5 text-xs shadow-lg">
+      {isHost && annotateMode && (
+        <div className="absolute left-2 top-1/2 z-30 flex max-h-[90%] -translate-y-1/2 flex-col items-center gap-1.5 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900/95 p-1.5 text-xs shadow-xl">
           <button
-            onClick={() => setAnnotateMode((v) => !v)}
-            className={`rounded px-2 py-1 font-medium ${
-              annotateMode ? "bg-indigo-600 text-white" : "border border-zinc-700 text-zinc-300"
-            }`}
-            title="আঁকা মোড চালু/বন্ধ করুন"
+            onClick={() => setHighlighter(false)}
+            className={`rounded-lg p-2 ${!highlighter ? "bg-indigo-600 text-white" : "text-zinc-300 hover:bg-zinc-700"}`}
+            title="কলম"
           >
-            {annotateMode ? "✏️ আঁকা চালু" : "🖱 স্ক্রল/ইন্টারঅ্যাকশন"}
+            <PenIcon />
           </button>
-          {annotateMode && (
-            <>
-              <div className="flex items-center gap-1">
-                {COLORS.map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => setColor(c)}
-                    className="h-5 w-5 rounded-full border-2"
-                    style={{
-                      backgroundColor: c,
-                      borderColor: color === c ? "#818cf8" : "transparent",
-                    }}
-                  />
-                ))}
-              </div>
-              <input
-                type="range"
-                min={2}
-                max={12}
-                value={lineWidth}
-                onChange={(e) => setLineWidth(Number(e.target.value))}
-                className="w-16"
-              />
-              <button
-                onClick={handleClear}
-                className="rounded border border-red-800 px-2 py-1 text-red-400 hover:bg-red-900/40"
-              >
-                মুছুন
-              </button>
-            </>
-          )}
+          <button
+            onClick={() => setHighlighter(true)}
+            className={`rounded-lg p-2 ${highlighter ? "bg-indigo-600 text-white" : "text-zinc-300 hover:bg-zinc-700"}`}
+            title="হাইলাইটার"
+          >
+            <HighlightIcon />
+          </button>
+          <div className="my-0.5 h-px w-6 bg-zinc-700" />
+          {COLORS.map((c) => (
+            <button
+              key={c}
+              onClick={() => setColor(c)}
+              className="h-5 w-5 rounded-full border-2"
+              style={{ backgroundColor: c, borderColor: color === c ? "#818cf8" : "#52525b" }}
+              title="রং"
+            />
+          ))}
+          <input
+            type="range"
+            min={2}
+            max={12}
+            value={lineWidth}
+            onChange={(e) => setLineWidth(Number(e.target.value))}
+            className="h-16 w-4"
+            style={{ writingMode: "vertical-lr", direction: "rtl" }}
+            title="মোটা/চিকন"
+          />
+          <div className="my-0.5 h-px w-6 bg-zinc-700" />
+          <button onClick={handleUndo} className="rounded-lg p-2 text-zinc-300 hover:bg-zinc-700" title="আনডু">
+            <UndoIcon />
+          </button>
+          <button onClick={handleClear} className="rounded-lg p-2 text-red-400 hover:bg-red-900/40" title="সব মুছুন">
+            <TrashIcon />
+          </button>
+          <button
+            onClick={() => onAnnotateModeChange(false)}
+            className="rounded-lg p-2 text-zinc-300 hover:bg-zinc-700"
+            title="আঁকা বন্ধ করুন"
+          >
+            <CloseIcon />
+          </button>
         </div>
       )}
     </>

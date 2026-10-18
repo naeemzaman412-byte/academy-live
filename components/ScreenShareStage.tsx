@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { VideoTrack, type TrackReference } from "@livekit/components-react";
+import { VideoTrack, useIsMuted, type TrackReference } from "@livekit/components-react";
 import AnnotationCanvas, { type ContentRect } from "@/components/AnnotationCanvas";
 
 /**
@@ -15,14 +15,24 @@ import AnnotationCanvas, { type ContentRect } from "@/components/AnnotationCanva
 export default function ScreenShareStage({
   trackRef,
   isHost,
+  isLocalShare,
+  annotateMode,
+  onAnnotateModeChange,
+  onStopShare,
+  presenterName,
 }: {
   trackRef: TrackReference;
   isHost: boolean;
+  isLocalShare: boolean;
+  annotateMode: boolean;
+  onAnnotateModeChange: (v: boolean) => void;
+  onStopShare: () => void;
+  presenterName: string;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const [resizeSignal, setResizeSignal] = useState(0);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const paused = useIsMuted(trackRef);
 
   const bump = useCallback(() => setResizeSignal((v) => v + 1), []);
 
@@ -31,6 +41,8 @@ export default function ScreenShareStage({
     const video = videoElRef.current;
     if (!wrapper || !video || !video.videoWidth || !video.videoHeight) return null;
 
+    // The canvas is positioned relative to the wrapper (position:absolute), so
+    // the rect is wrapper-relative for layout but viewport-based for pointer maths.
     const wrapperRect = wrapper.getBoundingClientRect();
     const videoAspect = video.videoWidth / video.videoHeight;
     const wrapperAspect = wrapperRect.width / wrapperRect.height;
@@ -38,11 +50,9 @@ export default function ScreenShareStage({
     let width: number;
     let height: number;
     if (videoAspect > wrapperAspect) {
-      // Letterboxed top/bottom
       width = wrapperRect.width;
       height = width / videoAspect;
     } else {
-      // Letterboxed left/right
       height = wrapperRect.height;
       width = height * videoAspect;
     }
@@ -57,8 +67,6 @@ export default function ScreenShareStage({
     if (!wrapper) return;
     let raf = 0;
     const observer = new ResizeObserver(() => {
-      // Coalesce bursts of resize callbacks (ResizeObserver fires once
-      // immediately on observe()) into a single state update per frame.
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => bump());
     });
@@ -69,24 +77,6 @@ export default function ScreenShareStage({
       observer.disconnect();
     };
   }, [bump]);
-
-  useEffect(() => {
-    function onFsChange() {
-      setIsFullscreen(document.fullscreenElement === wrapperRef.current);
-    }
-    document.addEventListener("fullscreenchange", onFsChange);
-    return () => document.removeEventListener("fullscreenchange", onFsChange);
-  }, []);
-
-  function toggleFullscreen() {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
-    } else {
-      wrapper.requestFullscreen?.();
-    }
-  }
 
   return (
     <div
@@ -101,14 +91,36 @@ export default function ScreenShareStage({
         onLoadedMetadata={bump}
       />
 
-      <AnnotationCanvas isHost={isHost} getContentRect={getContentRect} resizeSignal={resizeSignal} />
+      <AnnotationCanvas
+        isHost={isHost}
+        getContentRect={getContentRect}
+        resizeSignal={resizeSignal}
+        annotateMode={annotateMode}
+        onAnnotateModeChange={onAnnotateModeChange}
+      />
 
-      <button
-        onClick={toggleFullscreen}
-        className="absolute bottom-3 right-3 z-30 rounded-md border border-zinc-700 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
-      >
-        {isFullscreen ? "⤡ ফুলস্ক্রিন বন্ধ করুন" : "⤢ ফুলস্ক্রিন"}
-      </button>
+      {/* Zoom-style status pill */}
+      <div className="pointer-events-none absolute left-1/2 top-2 z-30 flex -translate-x-1/2 items-center gap-2">
+        <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-emerald-600/95 px-3 py-1 text-xs font-medium text-white shadow-lg">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+          {isLocalShare ? "আপনি স্ক্রিন শেয়ার করছেন" : `${presenterName} স্ক্রিন শেয়ার করছেন`}
+          {isLocalShare && (
+            <button
+              type="button"
+              onClick={onStopShare}
+              className="ml-1 rounded-full bg-red-600 px-2.5 py-0.5 text-[11px] font-semibold hover:bg-red-500"
+            >
+              শেয়ার বন্ধ
+            </button>
+          )}
+        </div>
+      </div>
+
+      {paused && (
+        <div className="absolute inset-0 z-[25] flex items-center justify-center bg-black/60 text-center text-sm text-zinc-100">
+          <div className="rounded-lg bg-zinc-900/90 px-4 py-3">⏸ শেয়ার পজ করা আছে</div>
+        </div>
+      )}
     </div>
   );
 }
