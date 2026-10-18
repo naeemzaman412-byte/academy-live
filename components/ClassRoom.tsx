@@ -19,6 +19,7 @@ import ParticipantGrid from "@/components/ParticipantGrid";
 import ParticipantsPanel from "@/components/ParticipantsPanel";
 import ClassChat from "@/components/ClassChat";
 import ScreenShareStage from "@/components/ScreenShareStage";
+import PipDrawBoard from "@/components/PipDrawBoard";
 import FloatingCameraStrip from "@/components/FloatingCameraStrip";
 import MeetingToolbar, { FloatingShareBar, type VideoPanelMode } from "@/components/MeetingToolbar";
 import { CloseIcon } from "@/components/icons";
@@ -158,6 +159,9 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
   const [notice, setNotice] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [locked, setLocked] = useState(false);
+  // which floating window (if any) is showing the drawing board; tied to the window
+  // object so it resets by itself when that window closes
+  const [drawWin, setDrawWin] = useState<Window | null>(null);
   // Chrome 136+ "Captured Surface Control": lets the preview forward mouse-wheel
   // scrolling to the tab that is being shared (only works when a browser TAB is shared).
   const [captureController, setCaptureController] = useState<unknown>(undefined);
@@ -325,6 +329,26 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const drawOn = !!pipWindow && drawWin === pipWindow && !!activeScreenShare && isLocalShare;
+
+  function resizePip(w: number, h: number) {
+    try {
+      pipWindow?.resizeTo(w, h);
+      pipWindow?.moveTo(Math.max(0, window.screen.availWidth - w - 20), 20);
+    } catch {
+      /* resizing needs a fresh click — ignore */
+    }
+  }
+  function openPipDraw() {
+    if (!pipWindow) return;
+    resizePip(Math.min(1000, window.screen.availWidth - 40), Math.min(680, window.screen.availHeight - 80));
+    setDrawWin(pipWindow);
+  }
+  function closePipDraw() {
+    resizePip(680, 84);
+    setDrawWin(null);
+  }
+
   const showStrip = !!activeScreenShare && videoMode === "strip";
   const showFloating = !!activeScreenShare && videoMode === "floating";
 
@@ -451,7 +475,11 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
 
       {pipWindow &&
         createPortal(
+          drawOn && activeScreenShare ? (
+            <PipDrawBoard trackRef={activeScreenShare} onClose={closePipDraw} />
+          ) : (
           <FloatingShareBar
+            onDraw={isHost && isLocalShare ? openPipDraw : undefined}
             micOn={isMicrophoneEnabled}
             camOn={isCameraEnabled}
             sharePaused={pausedOn}
@@ -464,7 +492,8 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
             onStopShare={toggleShare}
             onShowMeeting={() => window.focus()}
             onHide={() => setFloatHidden(true)}
-          />,
+          />
+          ),
           pipWindow.document.body
         )}
     </>

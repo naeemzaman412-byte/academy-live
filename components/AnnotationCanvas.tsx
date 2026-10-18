@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRoomContext } from "@livekit/components-react";
 import { RoomEvent } from "livekit-client";
 import { CloseIcon, HighlightIcon, PenIcon, SpotlightIcon, TrashIcon, UndoIcon } from "@/components/icons";
@@ -24,6 +24,13 @@ type WireMessage =
   | { t: "clear" };
 
 const ANNOTATION_TOPIC = "annotation";
+// Strokes + spotlight live in ONE shared store so two canvases (the class page
+// and the floating always-on-top window) always show exactly the same drawing.
+const store: { strokes: Map<string, Stroke>; spot: { x: number; y: number } | null } = {
+  strokes: new Map(),
+  spot: null,
+};
+const bus = typeof window !== "undefined" ? new EventTarget() : null;
 const COLORS = ["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#ffffff"];
 
 /**
@@ -43,7 +50,10 @@ export default function AnnotationCanvas({
   annotateMode,
   onAnnotateModeChange,
   locked,
+  passive = false,
 }: {
+  /** a second view of the same drawing (floating window): it never listens to the network itself */
+  passive?: boolean;
   locked: boolean;
   annotateMode: boolean;
   onAnnotateModeChange: (v: boolean) => void;
@@ -53,12 +63,23 @@ export default function AnnotationCanvas({
 }) {
   const room = useRoomContext();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const strokesRef = useRef<Map<string, Stroke>>(new Map());
+  const strokesRef = useRef<Map<string, Stroke>>(store.strokes);
+  const instanceId = useRef(Math.random().toString(36).slice(2));
   const drawingIdRef = useRef<string | null>(null);
 
   const [tool, setTool] = useState<"pen" | "highlighter" | "spotlight">("pen");
   const highlighter = tool === "highlighter";
-  const spotRef = useRef<{ x: number; y: number } | null>(null);
+  const spotRef = useMemo(
+    () => ({
+      get current() {
+        return store.spot;
+      },
+      set current(v: { x: number; y: number } | null) {
+        store.spot = v;
+      },
+    }),
+    []
+  );
   const lastRectRef = useRef("");
   const [color, setColor] = useState(COLORS[0]);
   const [lineWidth, setLineWidth] = useState(4);
@@ -116,7 +137,7 @@ export default function AnnotationCanvas({
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill();
     }
-  }, [getContentRect]);
+  }, [getContentRect, spotRef]);
 
   // Safety net: the shared window can be resized by the presenter at any time
   // (which changes the video's aspect ratio). Re-sync the canvas if the video's
@@ -143,7 +164,7 @@ export default function AnnotationCanvas({
         topic: ANNOTATION_TOPIC,
       });
     }
-  }, [annotateMode, tool, isHost, redraw, room]);
+  }, [annotateMode, tool, isHost, redraw, room, spotRef]);
 
   // Redraw whenever the parent tells us the underlying video's layout changed.
   useEffect(() => {
@@ -162,6 +183,16 @@ export default function AnnotationCanvas({
   // harmlessly no-ops on its own re-render path since drawing state is
   // updated locally + optimistically in the pointer handlers below).
   useEffect(() => {
+    if (!bus) return;
+    const onOther = (e: Event) => {
+      if ((e as CustomEvent<string>).detail !== instanceId.current) redraw();
+    };
+    bus.addEventListener("ann-redraw", onOther);
+    return () => bus.removeEventListener("ann-redraw", onOther);
+  }, [redraw]);
+
+  useEffect(() => {
+    if (passive) return;
     function handleData(payload: Uint8Array, _participant: unknown, _kind: unknown, topic?: string) {
       if (topic !== ANNOTATION_TOPIC) return;
       try {
@@ -176,9 +207,14 @@ export default function AnnotationCanvas({
       room.off(RoomEvent.DataReceived, handleData);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room]);
+  }, [room, passive]);
 
   function applyMessage(msg: WireMessage) {
+    applyMessageInner(msg);
+    bus?.dispatchEvent(new CustomEvent("ann-redraw", { detail: instanceId.current }));
+  }
+
+  function applyMessageInner(msg: WireMessage) {
     if (msg.t === "clear") {
       strokesRef.current.clear();
       spotRef.current = null;

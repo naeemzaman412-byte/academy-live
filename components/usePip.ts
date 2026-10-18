@@ -21,7 +21,7 @@ export function usePip() {
   const [pipWindow, setPipWindow] = useState<Window | null>(null);
   const [supported] = useState(() => typeof window !== "undefined" && !!api());
 
-  const open = useCallback(async (width = 600, height = 84) => {
+  const open = useCallback(async (width = 680, height = 84) => {
     const pip = api();
     if (!pip) return false;
     if (pip.window) {

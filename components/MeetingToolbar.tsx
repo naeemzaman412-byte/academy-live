@@ -375,7 +375,9 @@ export function FloatingShareBar({
   onStopShare,
   onShowMeeting,
   onHide,
+  onDraw,
 }: {
+  onDraw?: () => void;
   micOn: boolean;
   camOn: boolean;
   sharePaused: boolean;
@@ -425,6 +427,7 @@ export function FloatingShareBar({
             hideLabelOnMobile={false}
           />
         )}
+        {isHost && onDraw && <TBtn icon={<PenIcon />} label="আঁকুন" onClick={onDraw} hideLabelOnMobile={false} />}
         <TBtn icon={<EyeIcon />} label="ক্লাস দেখুন" onClick={onShowMeeting} hideLabelOnMobile={false} />
         <TBtn icon={<StopIcon />} label="শেয়ার বন্ধ" danger onClick={onStopShare} hideLabelOnMobile={false} />
       </div>
