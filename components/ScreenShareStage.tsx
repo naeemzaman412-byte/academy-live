@@ -23,7 +23,9 @@ export default function ScreenShareStage({
   presenterName,
   locked,
   onToggleLock,
+  captureController,
 }: {
+  captureController?: unknown;
   locked: boolean;
   onToggleLock: () => void;
   trackRef: TrackReference;
@@ -140,10 +142,28 @@ export default function ScreenShareStage({
     : undefined;
   const mirrorRisk = isLocalShare && surface === "monitor";
 
-  const canMove = !locked && !annotateMode;
+  // Scroll the SHARED TAB from this preview (Chrome 136+, only for tab shares).
+  const [scrollOn, setScrollOn] = useState(false);
+  const [scrollMsg, setScrollMsg] = useState<string | null>(null);
+  const cc = captureController as { forwardWheel?: (el: HTMLElement) => Promise<void> } | undefined;
+  const canForward = isLocalShare && surface === "browser" && typeof cc?.forwardWheel === "function";
+
+  async function enableScroll() {
+    const el = videoElRef.current;
+    if (!cc?.forwardWheel || !el) return;
+    try {
+      await cc.forwardWheel(el);
+      setScrollOn(true);
+      setScrollMsg(null);
+    } catch {
+      setScrollMsg("অনুমতি পাওয়া যায়নি — আবার চেষ্টা করে \"অনুমতি দিন\" চাপুন");
+    }
+  }
+
+  const canMove = !locked && !annotateMode && !scrollOn;
 
   function onWheel(e: React.WheelEvent) {
-    if (!canMove) return;
+    if (!canMove || scrollOn) return;
     const r = wrapperRef.current?.getBoundingClientRect();
     if (!r) return;
     if (e.ctrlKey || e.metaKey) {
@@ -224,6 +244,29 @@ export default function ScreenShareStage({
           onLoadedMetadata={bump}
         />
       </div>
+
+      {/* how to scroll the shared document */}
+      {isLocalShare && !mirrorRisk && !annotateMode && (
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute bottom-2 left-1/2 z-[37] max-w-[92%] -translate-x-1/2 rounded-lg bg-zinc-900/95 px-3 py-2 text-center text-xs text-zinc-200 shadow-lg"
+        >
+          {canForward ? (
+            scrollOn ? (
+              <span className="text-emerald-400">✓ এই প্রিভিউর ওপর মাউস-হুইল ঘোরালে শেয়ার করা ট্যাব স্ক্রল হবে</span>
+            ) : (
+              <button type="button" onClick={enableScroll} className="font-medium text-emerald-400 underline">
+                ↕ এই প্রিভিউ থেকেই স্ক্রল চালু করুন
+              </button>
+            )
+          ) : surface === "window" ? (
+            <span>
+              স্ক্রল করতে মূল উইন্ডোতে যান। প্রিভিউ থেকে স্ক্রল চাইলে PDF/ডকুমেন্টটা <b>Chrome ট্যাবে</b> খুলে সেই <b>ট্যাব</b> শেয়ার করুন।
+            </span>
+          ) : null}
+          {scrollMsg && <div className="mt-1 text-amber-300">{scrollMsg}</div>}
+        </div>
+      )}
 
       {mirrorRisk && (
         <div className="absolute inset-0 z-[24] flex items-center justify-center bg-zinc-950 p-6 text-center">

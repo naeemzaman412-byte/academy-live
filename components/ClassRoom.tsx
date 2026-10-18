@@ -158,6 +158,9 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
   const [notice, setNotice] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [locked, setLocked] = useState(false);
+  // Chrome 136+ "Captured Surface Control": lets the preview forward mouse-wheel
+  // scrolling to the tab that is being shared (only works when a browser TAB is shared).
+  const [captureController, setCaptureController] = useState<unknown>(undefined);
   const [shareSupported] = useState(
     () => typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getDisplayMedia === "function"
   );
@@ -211,7 +214,11 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
         setSharePaused(false);
       } else {
         setSharePaused(false);
+        const CC = (window as unknown as { CaptureController?: new () => unknown }).CaptureController;
+        const controller = CC ? new CC() : undefined;
+        setCaptureController(controller);
         await localParticipant.setScreenShareEnabled(true, {
+          ...(controller ? { controller } : {}),
           audio: shareSound,
           // never let the teacher pick this very tab (it would show itself inside itself)
           selfBrowserSurface: "exclude",
@@ -364,6 +371,7 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
                   onAnnotateModeChange={setAnnotating}
                   onStopShare={toggleShare}
                   presenterName={activeScreenShare.participant.name || activeScreenShare.participant.identity}
+                  captureController={isLocalShare ? captureController : undefined}
                   locked={lockedOn}
                   onToggleLock={() => setLocked(!lockedOn)}
                 />
