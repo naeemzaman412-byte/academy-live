@@ -67,7 +67,7 @@ export default function PipDrawBoard({
   }, [bump]);
 
   return (
-    <div ref={wrapperRef} className="relative h-screen w-screen overflow-hidden bg-black">
+    <div ref={wrapperRef} className="relative h-full w-full overflow-hidden bg-black">
       <VideoTrack
         ref={videoElRef}
         trackRef={trackRef}
@@ -96,7 +96,7 @@ export default function PipDrawBoard({
         onClick={onClose}
         className="absolute right-2 top-2 z-40 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-emerald-500"
       >
-        ✕ বন্ধ
+        🖱️ স্ক্রল করুন
       </button>
       {canScroll ? (
         <div className="absolute bottom-2 right-2 z-40 flex flex-col gap-1 rounded-lg bg-zinc-900/90 p-1 text-sm text-zinc-100 shadow-lg">
@@ -124,7 +124,7 @@ export default function PipDrawBoard({
         </div>
       ) : (
         <div className="pointer-events-none absolute bottom-1 left-1/2 z-40 -translate-x-1/2 rounded bg-black/70 px-2 py-0.5 text-[10px] text-zinc-300">
-          Word স্ক্রল করতে মাউস বোর্ডের বাইরে Word-এর ওপর রাখুন (বোর্ড টেনে সরানো যায়)
+          Word স্ক্রল করতে ওপরের ‘স্ক্রল করুন’ চাপুন — বোর্ড ছোট হবে, আবার ‘আঁকুন’ চাপলে ফিরবে
         </div>
       )}
     </div>

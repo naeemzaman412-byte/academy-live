@@ -99,6 +99,7 @@ export type ToolbarProps = {
   onToggleShare: () => void;
   onTogglePauseShare: () => void;
   onToggleAnnotate: () => void;
+  onDocShare?: () => void;
   onTogglePanel: (p: "chat" | "participants") => void;
   onVideoMode: (m: VideoPanelMode) => void;
   onToggleShareSound: () => void;
@@ -301,6 +302,11 @@ export default function MeetingToolbar(p: ToolbarProps) {
                 )
               )}
               <div className="my-1 border-t border-zinc-800" />
+              {p.isHost && !p.sharing && p.onDocShare && (
+                <MenuItem onClick={() => { p.onDocShare?.(); setMoreOpen(false); }}>
+                  <span>📄 PDF / ছবি / সাদা বোর্ড শেয়ার</span>
+                </MenuItem>
+                )}
               {/* these two live in the bar on bigger screens; on phones they are here */}
               <div className="sm:hidden">
                 {p.isHost && p.hasShareOnStage && (
@@ -376,8 +382,13 @@ export function FloatingShareBar({
   onShowMeeting,
   onHide,
   onDraw,
+  embedded = false,
+  drawing = false,
 }: {
   onDraw?: () => void;
+  /** sits on top of the drawing board instead of filling the whole floating window */
+  embedded?: boolean;
+  drawing?: boolean;
   micOn: boolean;
   camOn: boolean;
   sharePaused: boolean;
@@ -392,7 +403,11 @@ export function FloatingShareBar({
   onHide: () => void;
 }) {
   return (
-    <div className="flex h-screen w-screen flex-col justify-between bg-zinc-900 text-white">
+    <div
+      className={`flex flex-col justify-between bg-zinc-900 text-white ${
+        embedded ? "h-[84px] w-full shrink-0" : "h-screen w-screen"
+      }`}
+    >
       <div className="flex items-center justify-between gap-2 bg-emerald-600 px-2 py-0.5 text-[11px] font-medium">
         <span>
           ● {sharePaused ? "শেয়ার পজ করা আছে" : "আপনি স্ক্রিন শেয়ার করছেন"}
@@ -427,7 +442,16 @@ export function FloatingShareBar({
             hideLabelOnMobile={false}
           />
         )}
-        {isHost && onDraw && <TBtn icon={<PenIcon />} label="আঁকুন" onClick={onDraw} hideLabelOnMobile={false} />}
+        {isHost && onDraw && (
+          <TBtn
+            icon={<PenIcon />}
+            label={drawing ? "স্ক্রল করুন" : "আঁকুন"}
+            active={drawing}
+            title={drawing ? "বোর্ড ছোট করে Word/PDF স্ক্রল করুন" : "আঁকার বোর্ড খুলুন"}
+            onClick={onDraw}
+            hideLabelOnMobile={false}
+          />
+        )}
         <TBtn icon={<EyeIcon />} label="ক্লাস দেখুন" onClick={onShowMeeting} hideLabelOnMobile={false} />
         <TBtn icon={<StopIcon />} label="শেয়ার বন্ধ" danger onClick={onStopShare} hideLabelOnMobile={false} />
       </div>

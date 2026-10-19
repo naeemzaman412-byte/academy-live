@@ -295,7 +295,7 @@ export default function ScreenShareStage({
       </div>
 
       {/* how to scroll the shared document */}
-      {isLocalShare && !mirrorRisk && !annotateMode && (
+      {isLocalShare && !mirrorRisk && !annotateMode && (canForward || surface === "window") && (
         <div
           onPointerDown={(e) => e.stopPropagation()}
           className="absolute bottom-2 left-1/2 z-[37] max-w-[92%] -translate-x-1/2 rounded-lg bg-zinc-900/95 px-3 py-2 text-center text-xs text-zinc-200 shadow-lg"
@@ -308,7 +308,7 @@ export default function ScreenShareStage({
                 ↕ মাউস-হুইল স্ক্রল চালু করুন (ডান পাশের ⇈ ▲ ▼ ⇊ বোতাম এমনিতেই কাজ করে)
               </button>
             )
-          ) : surface === "window" || surface === "monitor" ? (
+          ) : surface === "window" ? (
             <span>
               উইন্ডো/পুরো স্ক্রিন শেয়ারে ব্রাউজার অন্য অ্যাপ স্ক্রল করতে পারে না। ক্লাস থেকেই পেজ বদলাতে PDF/ডকুমেন্টটা <b>Chrome ট্যাবে</b> খুলে শেয়ার করার সময় <b>“Chrome ট্যাব”</b> বেছে নিন — তখন এখানে পেজ-বোতাম আসবে।
             </span>

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRoomContext } from "@livekit/components-react";
-import { RoomEvent } from "livekit-client";
+import { RoomEvent, type Room } from "livekit-client";
 import { CloseIcon, HighlightIcon, PenIcon, SpotlightIcon, TrashIcon, UndoIcon } from "@/components/icons";
 
 export type ContentRect = { left: number; top: number; width: number; height: number };
@@ -31,6 +31,16 @@ const store: { strokes: Map<string, Stroke>; spot: { x: number; y: number } | nu
   spot: null,
 };
 const bus = typeof window !== "undefined" ? new EventTarget() : null;
+/** Wipes the drawing for everybody (used when the shared page changes). */
+export function clearAnnotations(room: Room) {
+  store.strokes.clear();
+  store.spot = null;
+  bus?.dispatchEvent(new CustomEvent("ann-redraw", { detail: "external" }));
+  room.localParticipant
+    .publishData(new TextEncoder().encode(JSON.stringify({ t: "clear" })), { reliable: true, topic: ANNOTATION_TOPIC })
+    .catch(() => {});
+}
+
 const COLORS = ["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#ffffff"];
 
 /**

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import {
@@ -20,6 +20,8 @@ import ParticipantsPanel from "@/components/ParticipantsPanel";
 import ClassChat from "@/components/ClassChat";
 import ScreenShareStage from "@/components/ScreenShareStage";
 import PipDrawBoard from "@/components/PipDrawBoard";
+import { DocShareBar, DocShareMenu } from "@/components/DocShareUI";
+import { useDocShare } from "@/components/useDocShare";
 import FloatingCameraStrip from "@/components/FloatingCameraStrip";
 import MeetingToolbar, { FloatingShareBar, type VideoPanelMode } from "@/components/MeetingToolbar";
 import { CloseIcon } from "@/components/icons";
@@ -145,6 +147,8 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
     useLocalParticipant();
   const participants = useParticipants();
   const recorder = useClassRecorder(room);
+  const docShare = useDocShare(localParticipant, room);
+  const [docMenu, setDocMenu] = useState(false);
   const pip = usePip();
 
   const [panel, setPanel] = useState<"chat" | "participants" | null>(null);
@@ -206,9 +210,8 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
 
   async function toggleShare() {
     if (!isScreenShareEnabled && !shareSupported) {
-      flash(
-        "মোবাইল ব্রাউজার (Chrome/Safari) স্ক্রিন শেয়ার সমর্থন করে না — এটা ব্রাউজারের সীমাবদ্ধতা। স্ক্রিন শেয়ার করতে ল্যাপটপ/পিসির Chrome ব্যবহার করুন; মোবাইল থেকে ক্যামেরা, মাইক, চ্যাট, আঁকা ও স্পটলাইট সবই চলবে।"
-      );
+      // phones cannot share the screen — offer PDF / photos / blank board instead
+      setDocMenu(true);
       return;
     }
     try {
@@ -331,29 +334,52 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // free the document-share resources once the share has ended (stopped from anywhere)
+  useEffect(() => {
+    if (!isScreenShareEnabled) docShare.release();
+  }, [isScreenShareEnabled, docShare]);
+
+  async function pickDocFiles(files: File[]) {
+    try {
+      await docShare.startFiles(files);
+      setDocMenu(false);
+    } catch (err) {
+      flash(err instanceof Error && err.message ? err.message : "ফাইলটা খোলা যায়নি");
+    }
+  }
+  async function pickBoard() {
+    try {
+      await docShare.startBoard();
+      setDocMenu(false);
+    } catch {
+      flash("বোর্ড শুরু করা যায়নি");
+    }
+  }
+  const docOn = !!docShare.info && isScreenShareEnabled && isLocalShare;
+
   const drawOn = drawOpen && !!pipWindow && !!activeScreenShare && isLocalShare;
 
-  function resizePip(w: number, h: number, left: number, top: number) {
+  // The floating window always keeps its control bar (mic, camera, pause, record, stop) on top.
+  // "আঁকুন" grows it downward into a drawing board; the same button ("স্ক্রল") shrinks it back to
+  // just the bar so the real Word/PDF is free to scroll. Size/position are remembered.
+  const lastBoardSize = useRef({ w: 700, h: 560 });
+  function resizePipOuter(w: number, innerH: number) {
     try {
-      pipWindow?.resizeTo(w, h);
-      pipWindow?.moveTo(Math.max(0, left), Math.max(0, top));
+      const chrome = pipWindow ? pipWindow.outerHeight - pipWindow.innerHeight : 40;
+      pipWindow?.resizeTo(w, innerH + chrome);
     } catch {
       /* resizing needs a fresh click — ignore */
     }
   }
   function openPipDraw() {
     if (!pipWindow) return;
-    // A compact board in the bottom-right corner, so the shared Word/PDF stays visible and
-    // scrollable with the real mouse wheel right next to it.
-    const dims = activeScreenShare?.publication?.dimensions;
-    const aspect = dims?.width && dims?.height ? dims.width / dims.height : 16 / 9;
-    const w = Math.min(560, Math.round(window.screen.availWidth * 0.4));
-    const h = Math.min(560, Math.max(380, Math.round(w / aspect)));
-    resizePip(w, h, window.screen.availWidth - w - 12, window.screen.availHeight - h - 60);
+    const { w, h } = lastBoardSize.current;
+    resizePipOuter(Math.max(w, 680), h);
     setDrawOpen(true);
   }
   function closePipDraw() {
-    resizePip(680, 84, window.screen.availWidth - 680 - 20, 20);
+    if (pipWindow) lastBoardSize.current = { w: pipWindow.innerWidth, h: pipWindow.innerHeight };
+    resizePipOuter(680, 84);
     setDrawOpen(false);
   }
 
@@ -427,6 +453,9 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
                   locked={lockedOn}
                   onToggleLock={() => setLocked(!lockedOn)}
                 />
+                {docOn && docShare.info && (
+                  <DocShareBar info={docShare.info} onGoto={docShare.goto} onStop={toggleShare} />
+                )}
                 {showFloating && <FloatingCameraStrip tracks={cameraTracks} mode="floating" />}
               </>
             ) : (
@@ -489,6 +518,7 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
         onToggleShare={toggleShare}
         onTogglePauseShare={togglePauseShare}
         onToggleAnnotate={() => setAnnotating(!annotatingOn)}
+        onDocShare={() => setDocMenu(true)}
         onTogglePanel={togglePanel}
         onVideoMode={setVideoMode}
         onToggleShareSound={() => setShareSound((v) => !v)}
@@ -501,13 +531,22 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
       />
       </div>
 
+      {docMenu && (
+        <DocShareMenu
+          busy={docShare.busy}
+          onFiles={pickDocFiles}
+          onBoard={pickBoard}
+          onClose={() => setDocMenu(false)}
+        />
+      )}
+
       {pipWindow &&
         createPortal(
-          drawOn && activeScreenShare ? (
-            <PipDrawBoard trackRef={activeScreenShare} onClose={closePipDraw} onScroll={scrollSharedTab} onForwardWheel={forwardWheelTo} />
-          ) : (
+          <div className="flex h-screen w-screen flex-col bg-zinc-900">
           <FloatingShareBar
-            onDraw={isHost && isLocalShare ? openPipDraw : undefined}
+            embedded
+            drawing={drawOn}
+            onDraw={isHost && isLocalShare ? (drawOn ? closePipDraw : openPipDraw) : undefined}
             micOn={isMicrophoneEnabled}
             camOn={isCameraEnabled}
             sharePaused={pausedOn}
@@ -521,7 +560,12 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
             onShowMeeting={() => window.focus()}
             onHide={() => setFloatHidden(true)}
           />
-          ),
+          {drawOn && activeScreenShare && (
+            <div className="relative min-h-0 flex-1">
+              <PipDrawBoard trackRef={activeScreenShare} onClose={closePipDraw} onScroll={scrollSharedTab} onForwardWheel={forwardWheelTo} />
+            </div>
+          )}
+          </div>,
           pipWindow.document.body
         )}
     </>
