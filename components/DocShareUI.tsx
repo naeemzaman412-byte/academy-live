@@ -22,13 +22,13 @@ export function DocShareMenu({
       >
         <div className="text-base font-semibold">ক্লাসে কী শেয়ার করবেন?</div>
         <p className="text-xs text-zinc-400">
-          ফোনের ব্রাউজার পুরো স্ক্রিন শেয়ার করতে পারে না। তাই PDF, ছবি বা সাদা বোর্ড শেয়ার করুন — পেজ বদলানো এবং আঁকা দুটোই চলবে।
+          Word (.docx), PDF, ছবি বা সাদা বোর্ড শেয়ার করুন — ◀ ▶ দিয়ে পেজ বদলানো এবং আঁকা দুটোই চলবে।
         </p>
         <label className="block cursor-pointer rounded-xl bg-emerald-600 px-4 py-3 text-center font-medium hover:bg-emerald-500">
-          📄 PDF বা ছবি বেছে নিন
+          📄 Word / PDF / ছবি বেছে নিন
           <input
             type="file"
-            accept="application/pdf,image/*"
+            accept="application/pdf,image/*,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             multiple
             className="hidden"
             disabled={busy}

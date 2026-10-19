@@ -311,8 +311,10 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
 
   // Floating (always-on-top) Zoom-style controls while this user shares.
   const { open: openPip, close: closePip, supported: pipSupported, pipWindow } = pip;
+  const docActive = docShare.busy || !!docShare.info;
   useEffect(() => {
-    if (isScreenShareEnabled && pipSupported && !floatHidden) {
+    // a shared document lives inside this page (◀ ▶ + pen on the stage) — no floating window needed
+    if (isScreenShareEnabled && pipSupported && !floatHidden && !docActive) {
       openPip().then((ok) => {
         setPipBlocked(!ok);
         setDrawOpen(false);
@@ -320,7 +322,7 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
     } else {
       closePip();
     }
-  }, [isScreenShareEnabled, pipSupported, floatHidden, openPip, closePip]);
+  }, [isScreenShareEnabled, pipSupported, floatHidden, docActive, openPip, closePip]);
 
   // Ctrl+Alt+Shift+H toggles the floating controls (same as Zoom).
   useEffect(() => {

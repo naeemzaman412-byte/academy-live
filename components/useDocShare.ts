@@ -53,6 +53,49 @@ async function pdfSource(file: File): Promise<PageSource> {
   };
 }
 
+/** Word (.docx): laid out page-by-page by docx-preview, then each page is photographed to a canvas */
+async function docxSource(file: File): Promise<PageSource> {
+  const [{ renderAsync }, h2c] = await Promise.all([import("docx-preview"), import("html2canvas")]);
+  const html2canvas = h2c.default;
+  const host = document.createElement("div");
+  host.style.cssText = "position:fixed;left:-20000px;top:0;width:900px;background:#fff;pointer-events:none;";
+  document.body.appendChild(host);
+  try {
+    await renderAsync(await file.arrayBuffer(), host, undefined, {
+      className: "docx",
+      inWrapper: false,
+      breakPages: true,
+      ignoreLastRenderedPageBreak: false,
+      experimental: true,
+    });
+    if (document.fonts?.ready) await document.fonts.ready;
+  } catch {
+    host.remove();
+    throw new Error("Word ফাইলটা খোলা যায়নি — PDF করে দিন");
+  }
+  const pages = Array.from(host.querySelectorAll<HTMLElement>("section.docx"));
+  if (!pages.length) {
+    host.remove();
+    throw new Error("Word ফাইলটা খোলা যায়নি — PDF করে দিন");
+  }
+  return {
+    total: pages.length,
+    async render(i, canvas) {
+      const el = pages[i];
+      const w = el.offsetWidth || 794;
+      const h = el.offsetHeight || 1123;
+      const scale = LONG_EDGE / Math.max(w, h);
+      const shot = await html2canvas(el, { scale, backgroundColor: "#ffffff", useCORS: true, logging: false });
+      canvas.width = shot.width;
+      canvas.height = shot.height;
+      paintWhite(canvas).drawImage(shot, 0, 0);
+    },
+    destroy() {
+      host.remove();
+    },
+  };
+}
+
 function imageSource(files: File[]): PageSource {
   return {
     total: files.length,
@@ -166,7 +209,10 @@ export function useDocShare(localParticipant: LocalParticipant, room: Room) {
     async (files: File[]) => {
       if (!files.length) return;
       const isPdf = (f: File) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+      const isDocx = (f: File) => /\.docx$/i.test(f.name) || f.type.includes("wordprocessingml");
+      if (/\.doc$/i.test(files[0].name)) throw new Error("পুরোনো .doc ফাইল খোলা যায় না — Word-এ .docx বা PDF করে সেভ করুন");
       if (isPdf(files[0])) await begin(await pdfSource(files[0]), "pdf", files[0].name);
+      else if (isDocx(files[0])) await begin(await docxSource(files[0]), "pdf", files[0].name);
       else {
         const imgs = files.filter((f) => f.type.startsWith("image/"));
         if (!imgs.length) throw new Error("PDF বা ছবি বেছে নিন");

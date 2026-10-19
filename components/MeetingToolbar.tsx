@@ -226,7 +226,14 @@ export default function MeetingToolbar(p: ToolbarProps) {
                 <TBtn icon={<StopIcon />} label="শেয়ার বন্ধ" danger disabled={p.locked} onClick={p.onToggleShare} />
               </>
             ) : (
-              <TBtn icon={<ShareIcon />} label="শেয়ার" success onClick={p.onToggleShare} title="স্ক্রিন শেয়ার করুন" />
+              <>
+                <TBtn icon={<ShareIcon />} label="শেয়ার" success onClick={p.onToggleShare} title="স্ক্রিন শেয়ার করুন" />
+                {p.onDocShare && (
+                  <div className="hidden sm:block">
+                    <TBtn icon={<span className="text-lg">📄</span>} label="ডকুমেন্ট" success onClick={p.onDocShare} title="Word / PDF / ছবি শেয়ার — ◀ ▶ পেজ বাটন ও আঁকা সহ" />
+                  </div>
+                )}
+              </>
             ))}
 
           {p.isHost && p.hasShareOnStage && (
