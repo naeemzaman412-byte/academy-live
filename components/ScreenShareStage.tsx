@@ -397,7 +397,8 @@ export default function ScreenShareStage({
       <div className="pointer-events-none absolute left-1/2 top-2 z-[36] flex -translate-x-1/2 items-center gap-2">
         <div onPointerDown={(e) => e.stopPropagation()} className="pointer-events-auto flex items-center gap-2 rounded-full bg-emerald-600/95 px-3 py-1 text-xs font-medium text-white shadow-lg">
           <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
-          {isLocalShare ? "আপনি স্ক্রিন শেয়ার করছেন" : `${presenterName} স্ক্রিন শেয়ার করছেন`}
+          <span className="hidden sm:inline">{isLocalShare ? "আপনি স্ক্রিন শেয়ার করছেন" : `${presenterName} স্ক্রিন শেয়ার করছেন`}</span>
+          <span className="sm:hidden">{isLocalShare ? "শেয়ার চলছে" : "স্ক্রিন শেয়ার"}</span>
           <button
             type="button"
             onClick={onToggleLock}

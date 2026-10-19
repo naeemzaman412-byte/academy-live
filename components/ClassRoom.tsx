@@ -494,7 +494,7 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
         </aside>
       </div>
 
-      <div className={lockedOn ? "pointer-events-none opacity-50" : ""}>
+      <div>
       <MeetingToolbar
         isHost={isHost}
         micOn={isMicrophoneEnabled}
@@ -517,7 +517,11 @@ function RoomInner({ roomName, isHost }: { roomName: string; isHost: boolean }) 
         onToggleCam={toggleCam}
         onToggleShare={toggleShare}
         onTogglePauseShare={togglePauseShare}
-        onToggleAnnotate={() => setAnnotating(!annotatingOn)}
+        locked={lockedOn}
+        onToggleAnnotate={() => {
+          if (!annotatingOn) setLocked(false); // drawing needs the stage unlocked
+          setAnnotating(!annotatingOn);
+        }}
         onDocShare={() => setDocMenu(true)}
         onTogglePanel={togglePanel}
         onVideoMode={setVideoMode}

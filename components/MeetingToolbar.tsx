@@ -61,7 +61,7 @@ export function TBtn({
       disabled={disabled}
       title={title ?? label}
       aria-label={label}
-      className={`relative flex min-w-10 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 transition disabled:opacity-40 sm:min-w-14 sm:px-2.5 ${tone}`}
+      className={`relative flex min-w-9 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1.5 transition disabled:opacity-40 sm:min-w-14 sm:px-2.5 ${tone}`}
     >
       {icon}
       <span className={`text-[10px] leading-tight sm:text-[11px] ${hideLabelOnMobile ? "hidden min-[420px]:block" : ""}`}>
@@ -109,6 +109,8 @@ export type ToolbarProps = {
   onCopyLink?: () => void;
   linkCopied?: boolean;
   onLeave: () => void;
+  /** screen lock is on: mic, camera and drawing stay usable, but leaving / stopping the share is blocked */
+  locked?: boolean;
 };
 
 function MenuItem({
@@ -221,22 +223,21 @@ export default function MeetingToolbar(p: ToolbarProps) {
                   active={p.sharePaused}
                   title="শেয়ার পজ / চালু"
                 />
-                <TBtn icon={<StopIcon />} label="শেয়ার বন্ধ" danger onClick={p.onToggleShare} />
+                <TBtn icon={<StopIcon />} label="শেয়ার বন্ধ" danger disabled={p.locked} onClick={p.onToggleShare} />
               </>
             ) : (
               <TBtn icon={<ShareIcon />} label="শেয়ার" success onClick={p.onToggleShare} title="স্ক্রিন শেয়ার করুন" />
             ))}
 
           {p.isHost && p.hasShareOnStage && (
-            <div className="hidden sm:block">
-              <TBtn
-                icon={<PenIcon />}
-                label="আঁকুন"
-                active={p.annotating}
-                onClick={p.onToggleAnnotate}
-                title="শেয়ার করা স্ক্রিনের ওপর আঁকুন"
-              />
-            </div>
+            <TBtn
+              icon={<PenIcon />}
+              label="আঁকুন"
+              active={p.annotating}
+              onClick={p.onToggleAnnotate}
+              title="শেয়ার করা স্ক্রিনের ওপর আঁকুন"
+              hideLabelOnMobile={false}
+            />
           )}
 
           <div className="relative hidden sm:block">
@@ -264,14 +265,17 @@ export default function MeetingToolbar(p: ToolbarProps) {
           </div>
 
           {p.isHost && rec.supported && (
-            <TBtn
-              icon={<RecIcon active={rec.recording} />}
-              label={rec.recording ? formatClock(rec.seconds) : "রেকর্ড"}
-              active={rec.recording}
-              onClick={rec.recording ? rec.stop : rec.start}
-              title={rec.recording ? "রেকর্ডিং বন্ধ করে সেভ করুন" : "রেকর্ডিং শুরু করুন"}
-              hideLabelOnMobile={false}
-            />
+            // on phones, while something is shared, the draw button takes this spot (recording stays in "আরও")
+            <div className={p.hasShareOnStage ? "hidden sm:block" : ""}>
+              <TBtn
+                icon={<RecIcon active={rec.recording} />}
+                label={rec.recording ? formatClock(rec.seconds) : "রেকর্ড"}
+                active={rec.recording}
+                onClick={rec.recording ? rec.stop : rec.start}
+                title={rec.recording ? "রেকর্ডিং বন্ধ করে সেভ করুন" : "রেকর্ডিং শুরু করুন"}
+                hideLabelOnMobile={false}
+              />
+            </div>
           )}
 
           <div className="relative">
@@ -357,7 +361,7 @@ export default function MeetingToolbar(p: ToolbarProps) {
 
         {/* right group */}
         <div className="flex items-center">
-          <TBtn icon={<LeaveIcon />} label="ছাড়ুন" danger onClick={p.onLeave} title="ক্লাস থেকে বের হন" hideLabelOnMobile />
+          <TBtn icon={<LeaveIcon />} label="ছাড়ুন" danger disabled={p.locked} onClick={p.onLeave} title="ক্লাস থেকে বের হন" hideLabelOnMobile />
         </div>
       </div>
     </div>
