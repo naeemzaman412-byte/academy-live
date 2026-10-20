@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAccessToken } from "@/lib/livekit";
+import { getCreds } from "@/lib/livekitConfig";
 import { getRoomServiceClient } from "@/lib/roomAuth";
 
 // Student join only. Hosts get their tokens from /api/room/create (new
@@ -20,7 +21,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const svc = getRoomServiceClient();
+    const svc = getRoomServiceClient(roomName);
     const existing = await svc.listRooms([roomName]);
     if (existing.length === 0) {
       return NextResponse.json(
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest) {
       role: "student",
     });
 
-    return NextResponse.json({ token });
+    return NextResponse.json({ token, serverUrl: getCreds(roomName).url });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
