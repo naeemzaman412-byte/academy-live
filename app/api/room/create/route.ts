@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAccessToken } from "@/lib/livekit";
+import { getCreds, MAX_TEACHERS } from "@/lib/livekitConfig";
 import {
   getRoomServiceClient,
   generateUniqueRoomName,
@@ -12,7 +13,8 @@ import {
 // email and a room password of their choosing.
 export async function POST(req: NextRequest) {
   try {
-    const { teacherName, teacherEmail, roomPassword } = (await req.json()) as {
+    const { teacherName, teacherEmail, roomPassword, teacherNo } = (await req.json()) as {
+      teacherNo?: number | string | null;
       teacherName?: string;
       teacherEmail?: string;
       roomPassword?: string;
@@ -25,8 +27,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const svc = getRoomServiceClient();
-    const roomName = await generateUniqueRoomName(svc, teacherName);
+    const no = teacherNo ? Number(teacherNo) : null;
+    if (no !== null && (!Number.isInteger(no) || no < 1 || no > MAX_TEACHERS)) {
+      return NextResponse.json({ error: "শিক্ষক নম্বর ১ থেকে ৫ এর মধ্যে দিন" }, { status: 400 });
+    }
+    const creds = getCreds(no);
+    const svc = getRoomServiceClient(no);
+    const roomName = await generateUniqueRoomName(svc, teacherName, no);
 
     const metadata: RoomMetadata = {
       passwordHash: hashRoomPassword(roomName, roomPassword),
@@ -55,7 +62,7 @@ export async function POST(req: NextRequest) {
       role: "host",
     });
 
-    return NextResponse.json({ roomName, token });
+    return NextResponse.json({ roomName, token, serverUrl: creds.url });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
