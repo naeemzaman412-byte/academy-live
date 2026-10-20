@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAccessToken } from "@/lib/livekit";
+import { getCreds } from "@/lib/livekitConfig";
 import { getRoomServiceClient, getRoomMetadata, hashRoomPassword } from "@/lib/roomAuth";
 
 // Lets a teacher reclaim the host role for a class they already started —
@@ -20,7 +21,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const svc = getRoomServiceClient();
+    const svc = getRoomServiceClient(roomName);
     const metadata = await getRoomMetadata(svc, roomName);
     if (!metadata) {
       return NextResponse.json(
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest) {
       role: "host",
     });
 
-    return NextResponse.json({ roomName, token });
+    return NextResponse.json({ roomName, token, serverUrl: getCreds(roomName).url });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
