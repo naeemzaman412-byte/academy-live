@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { RoomServiceClient } from "livekit-server-sdk";
+import { getRoomServiceClient } from "@/lib/roomAuth";
 
 // NOTE (MVP security note — see README "Production hardening"):
 // This route trusts that only the host UI calls it. For real deployments,
@@ -21,14 +21,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const livekitUrl = process.env.LIVEKIT_URL;
-    const apiKey = process.env.LIVEKIT_API_KEY;
-    const apiSecret = process.env.LIVEKIT_API_SECRET;
-    if (!livekitUrl || !apiKey || !apiSecret) {
-      throw new Error("LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET must be set");
-    }
-
-    const svc = new RoomServiceClient(livekitUrl, apiKey, apiSecret);
+    const svc = getRoomServiceClient(roomName);
 
     if (action === "remove") {
       await svc.removeParticipant(roomName, participantIdentity);
