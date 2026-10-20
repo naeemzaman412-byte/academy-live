@@ -43,6 +43,7 @@ function shareOrigin() {
 type StoredJoinInfo = {
   name: string;
   role: "host" | "student";
+  serverUrl?: string; // LiveKit project of this class (differs per teacher)
   token?: string; // pre-fetched for hosts (created via /api/room/create or /api/room/host-rejoin)
 };
 
@@ -57,7 +58,8 @@ export default function ClassRoom({ roomName }: { roomName: string }) {
   const [token, setToken] = useState<string | null>(() => joinInfo?.token ?? null);
   const [error, setError] = useState<string | null>(null);
 
-  const livekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
+  const [serverUrl, setServerUrl] = useState<string | null>(() => joinInfo?.serverUrl ?? null);
+  const livekitUrl = serverUrl ?? (joinInfo?.token ? process.env.NEXT_PUBLIC_LIVEKIT_URL : undefined);
 
   useEffect(() => {
     // No name entered for this room in this browser tab — send back to the join screen.
@@ -79,7 +81,10 @@ export default function ClassRoom({ roomName }: { roomName: string }) {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Token request failed");
-        if (!cancelled) setToken(data.token);
+        if (!cancelled) {
+          setServerUrl(data.serverUrl ?? process.env.NEXT_PUBLIC_LIVEKIT_URL ?? null);
+          setToken(data.token);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Unknown error");
@@ -109,15 +114,7 @@ export default function ClassRoom({ roomName }: { roomName: string }) {
     );
   }
 
-  if (!livekitUrl) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-8 text-center text-amber-300">
-        NEXT_PUBLIC_LIVEKIT_URL সেট করা নেই। .env.local ফাইলে এটি বসান (README দেখুন)।
-      </div>
-    );
-  }
-
-  if (!token || !joinInfo) {
+  if (!token || !joinInfo || !livekitUrl) {
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-zinc-400">
         ক্লাসে যুক্ত হওয়া হচ্ছে...
