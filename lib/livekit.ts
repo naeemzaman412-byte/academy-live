@@ -1,4 +1,5 @@
 import { AccessToken } from "livekit-server-sdk";
+import { getCreds } from "@/lib/livekitConfig";
 
 export type ParticipantRole = "host" | "student";
 
@@ -13,14 +14,8 @@ export async function createAccessToken(opts: {
   participantIdentity: string;
   role: ParticipantRole;
 }) {
-  const apiKey = process.env.LIVEKIT_API_KEY;
-  const apiSecret = process.env.LIVEKIT_API_SECRET;
-
-  if (!apiKey || !apiSecret) {
-    throw new Error(
-      "LIVEKIT_API_KEY / LIVEKIT_API_SECRET are not set. Copy .env.local.example to .env.local and fill them in."
-    );
-  }
+  // picks this room's teacher project (t1-… t5-…) or the default one
+  const { apiKey, apiSecret } = getCreds(opts.roomName);
 
   const at = new AccessToken(apiKey, apiSecret, {
     identity: opts.participantIdentity,

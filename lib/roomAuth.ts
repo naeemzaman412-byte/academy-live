@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { RoomServiceClient } from "livekit-server-sdk";
+import { getCreds } from "@/lib/livekitConfig";
 
 export type RoomMetadata = {
   passwordHash: string;
@@ -8,18 +9,10 @@ export type RoomMetadata = {
   createdAt: number;
 };
 
-function getEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`${name} is not set. Copy .env.local.example to .env.local.`);
-  return v;
-}
-
-export function getRoomServiceClient() {
-  return new RoomServiceClient(
-    getEnv("LIVEKIT_URL"),
-    getEnv("LIVEKIT_API_KEY"),
-    getEnv("LIVEKIT_API_SECRET")
-  );
+/** Room service for the LiveKit project that owns this room (or teacher number). */
+export function getRoomServiceClient(roomOrTeacher: string | number | null = null) {
+  const c = getCreds(roomOrTeacher);
+  return new RoomServiceClient(c.url, c.apiKey, c.apiSecret);
 }
 
 /**
@@ -31,7 +24,12 @@ export function getRoomServiceClient() {
  * different device).
  */
 export function hashRoomPassword(roomName: string, password: string): string {
-  const pepper = process.env.LIVEKIT_API_SECRET || "academy-live";
+  let pepper = "academy-live";
+  try {
+    pepper = getCreds(roomName).apiSecret;
+  } catch {
+    /* keep default */
+  }
   return crypto
     .createHmac("sha256", pepper)
     .update(`${roomName}::${password}`)
@@ -54,9 +52,10 @@ function randomSuffix(len = 5) {
 /** Generates a room name that doesn't currently exist on the LiveKit server. */
 export async function generateUniqueRoomName(
   svc: RoomServiceClient,
-  teacherName: string
+  teacherName: string,
+  teacherNo: number | null = null
 ) {
-  const base = slugify(teacherName) || "class";
+  const base = `${teacherNo ? `t${teacherNo}-` : ""}${slugify(teacherName) || "class"}`;
   for (let attempt = 0; attempt < 8; attempt++) {
     const candidate = `${base}-${randomSuffix()}`;
     const existing = await svc.listRooms([candidate]);
