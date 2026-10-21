@@ -22,6 +22,7 @@ function HomeInner() {
   const [teacherName, setTeacherName] = useState("");
   const [teacherEmail, setTeacherEmail] = useState("");
   const [roomPassword, setRoomPassword] = useState("");
+  const [teacherNo, setTeacherNo] = useState("");
 
   // host-rejoin fields
   const [rejoinRoomName, setRejoinRoomName] = useState("");
@@ -46,8 +47,8 @@ function HomeInner() {
   async function handleCreateClass(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!teacherName.trim() || !teacherEmail.trim() || !roomPassword.trim()) {
-      setError("নাম, ইমেইল এবং রুম পাসওয়ার্ড দিন।");
+    if (!teacherName.trim() || !teacherEmail.trim() || !roomPassword.trim() || !teacherNo) {
+      setError("শিক্ষক নম্বর, নাম, ইমেইল এবং রুম পাসওয়ার্ড দিন।");
       return;
     }
     setLoading(true);
@@ -59,6 +60,7 @@ function HomeInner() {
           teacherName: teacherName.trim(),
           teacherEmail: teacherEmail.trim(),
           roomPassword,
+          teacherNo: Number(teacherNo),
         }),
       });
       const data = await res.json();
@@ -67,6 +69,7 @@ function HomeInner() {
         name: teacherName.trim(),
         role: "host",
         token: data.token,
+        serverUrl: data.serverUrl,
         roomPassword,
       });
     } catch (err) {
@@ -100,6 +103,7 @@ function HomeInner() {
         name: rejoinTeacherName.trim(),
         role: "host",
         token: data.token,
+        serverUrl: data.serverUrl,
         roomPassword: rejoinPassword,
       });
     } catch (err) {
@@ -156,6 +160,16 @@ function HomeInner() {
 
         {tab === "host-new" && (
           <form onSubmit={handleCreateClass} className="mt-6 flex flex-col gap-4">
+            <Field label="শিক্ষক নম্বর (আপনাকে যে নম্বর দেওয়া হয়েছে)">
+              <select value={teacherNo} onChange={(e) => setTeacherNo(e.target.value)} className={inputCls}>
+                <option value="">— নম্বর বেছে নিন —</option>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={n}>
+                    শিক্ষক {n}
+                  </option>
+                ))}
+              </select>
+            </Field>
             <Field label="আপনার নাম">
               <input
                 value={teacherName}
